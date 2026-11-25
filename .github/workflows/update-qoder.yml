@@ -1,0 +1,81 @@
+name: Update Qoder CLI
+
+on:
+  schedule:
+    - cron: '23 3 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: update-qoder
+  cancel-in-progress: false
+
+jobs:
+  update-test-pr:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0
+      - name: Check and fetch official release
+        id: update
+        shell: pwsh
+        run: |
+          $before = (Get-Content bucket/qoder-cli.json -Raw | ConvertFrom-Json).version
+          Copy-Item bucket/qoder-cli.json (Join-Path $env:RUNNER_TEMP 'qoder-previous.json')
+          python scripts/update-qoder.py
+          if ($LASTEXITCODE -ne 0) { throw "Qoder updater failed with exit code $LASTEXITCODE" }
+          $after = (Get-Content bucket/qoder-cli.json -Raw | ConvertFrom-Json).version
+          "changed=$($before -ne $after)" >> $env:GITHUB_OUTPUT
+          "old_version=$before" >> $env:GITHUB_OUTPUT
+          "new_version=$after" >> $env:GITHUB_OUTPUT
+      - name: Validate candidate manifest
+        if: steps.update.outputs.changed == 'true'
+        shell: pwsh
+        run: |
+          python scripts/validate-manifest.py --check-url
+          if ($LASTEXITCODE -ne 0) { throw "Manifest validation failed with exit code $LASTEXITCODE" }
+          python -m unittest discover -s tests -v
+          if ($LASTEXITCODE -ne 0) { throw "Unit tests failed with exit code $LASTEXITCODE" }
+      - name: Test current manifest install and uninstall
+        if: steps.update.outputs.changed == 'true'
+        shell: pwsh
+        run: ./scripts/test-scoop.ps1 -Mode Install
+      - name: Test real upgrade from previous official version
+        if: steps.update.outputs.changed == 'true'
+        shell: pwsh
+        run: ./scripts/test-scoop.ps1 -Mode Upgrade -PreviousManifestPath (Join-Path $env:RUNNER_TEMP 'qoder-previous.json')
+      - name: Create update pull request after all checks pass
+        if: steps.update.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: pwsh
+        run: |
+          $old = '${{ steps.update.outputs.old_version }}'
+          $new = '${{ steps.update.outputs.new_version }}'
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          $branch = "automation/qoder-$new"
+          git switch -c $branch
+          git add bucket/qoder-cli.json
+          git commit -m "chore(qoder): update $old to $new"
+          git push --set-upstream origin $branch
+          $manifest = Get-Content bucket/qoder-cli.json -Raw | ConvertFrom-Json
+          $sha = $manifest.architecture.'64bit'.hash
+          $url = $manifest.architecture.'64bit'.url
+          $body = @"
+          ## Qoder CLI update
+
+          - Version: $old → $new
+          - Official source: $url
+          - SHA256: ``$sha``
+          - Verification: official channel metadata SHA256 matched the downloaded archive; ZIP contents checked; JSON/manifest validation, Python unit tests, Windows fresh install/version/help/path/uninstall, and a real upgrade from $old passed.
+
+          This PR requires human review and is not auto-merged.
+          "@
+          $bodyPath = Join-Path $env:RUNNER_TEMP 'qoder-pr-body.md'
+          Set-Content -LiteralPath $bodyPath -Value $body -Encoding utf8
+          gh pr create --title "chore(qoder): update $old to $new" --body-file $bodyPath

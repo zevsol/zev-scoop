@@ -1,0 +1,68 @@
+name: Test Qoder CLI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows-lifecycle:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0
+      - name: Validate current checkout
+        shell: pwsh
+        run: |
+          python scripts/validate-manifest.py --check-url
+          if ($LASTEXITCODE -ne 0) { throw 'Current checkout manifest validation failed.' }
+          python -m unittest discover -s tests -v
+          if ($LASTEXITCODE -ne 0) { throw 'Python unit tests failed.' }
+      - name: Find a distinct historical manifest for upgrade test
+        id: history
+        shell: pwsh
+        run: |
+          $current = (Get-Content bucket/qoder-cli.json -Raw | ConvertFrom-Json).version
+          if ('${{ github.event_name }}' -eq 'pull_request') {
+            $source = 'origin/${{ github.base_ref }}:bucket/qoder-cli.json'
+          }
+          else {
+            $source = 'HEAD^:bucket/qoder-cli.json'
+          }
+          $previousJson = git show $source 2>$null
+          if ($LASTEXITCODE -eq 0) {
+            $previous = ($previousJson -join "`n") | ConvertFrom-Json
+            if ($previous.version -ne $current) {
+              $path = Join-Path $env:RUNNER_TEMP 'qoder-cli-previous.json'
+              [IO.File]::WriteAllText($path, ($previousJson -join "`n"), [Text.UTF8Encoding]::new($false))
+              "available=true" >> $env:GITHUB_OUTPUT
+              "previous_version=$($previous.version)" >> $env:GITHUB_OUTPUT
+              "current_version=$current" >> $env:GITHUB_OUTPUT
+              "manifest_path=$path" >> $env:GITHUB_OUTPUT
+            }
+            else {
+              "available=false" >> $env:GITHUB_OUTPUT
+              "reason=same-version" >> $env:GITHUB_OUTPUT
+            }
+          }
+          else {
+            "available=false" >> $env:GITHUB_OUTPUT
+            "reason=no-history" >> $env:GITHUB_OUTPUT
+          }
+      - name: Test current manifest install, command, path, and uninstall
+        shell: pwsh
+        run: ./scripts/test-scoop.ps1 -Mode Install
+      - name: Test upgrade from historical official package
+        if: steps.history.outputs.available == 'true'
+        shell: pwsh
+        run: ./scripts/test-scoop.ps1 -Mode Upgrade -PreviousManifestPath '${{ steps.history.outputs.manifest_path }}'
+      - name: Report upgrade test as skipped
+        if: steps.history.outputs.available != 'true'
+        shell: pwsh
+        run: |
+          $reason = '${{ steps.history.outputs.reason }}'
+          "Upgrade test: SKIPPED ($reason) — no distinct historical manifest is available." | Tee-Object -FilePath $env:GITHUB_STEP_SUMMARY -Append

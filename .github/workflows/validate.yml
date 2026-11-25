@@ -1,0 +1,24 @@
+name: Validate bucket manifests
+
+on:
+  pull_request:
+  push:
+    branches: [main, master, dev]
+
+permissions:
+  contents: read
+
+jobs:
+  manifest:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: Validate current manifests and maintenance scripts
+        shell: pwsh
+        run: |
+          python -m py_compile scripts/update-qoder.py scripts/validate-manifest.py
+          if ($LASTEXITCODE -ne 0) { throw 'Python syntax check failed.' }
+          python scripts/validate-manifest.py --check-url
+          if ($LASTEXITCODE -ne 0) { throw 'Qoder CLI manifest validation failed.' }
+          python -m unittest discover -s tests -v
+          if ($LASTEXITCODE -ne 0) { throw 'Python unit tests failed.' }
