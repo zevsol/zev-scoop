@@ -347,7 +347,16 @@ function Assert-QoderVersion([string]$ExpectedVersion) {
 
 function Restore-ProcessEnvironment {
     foreach ($name in $previousEnvironment.Keys) {
-        [Environment]::SetEnvironmentVariable($name, $previousEnvironment[$name], 'Process')
+        $previousValue = $previousEnvironment[$name]
+        if ($null -eq $previousValue) {
+            $environmentPath = "Env:$name"
+            if (Test-Path -LiteralPath $environmentPath) {
+                Remove-Item -LiteralPath $environmentPath -ErrorAction Stop
+            }
+        }
+        else {
+            [Environment]::SetEnvironmentVariable($name, $previousValue, 'Process')
+        }
     }
 }
 
@@ -622,6 +631,19 @@ $env:PATH = (($env:PATH -split ';' | Where-Object {
             -InitialPath 'C:\Keep' -InputKind Missing -ExpectedError 'Excluded Scoop paths JSON file was not found'
         Invoke-ExcludedPathTransportCase -Name 'invalid JSON' -InitialPath 'C:\Keep' -InputKind RawJson `
             -RawJson '{"paths":'
+
+        $restoreProbeNames = @('SCOOP', 'SCOOP_GLOBAL', 'SCOOP_CACHE', 'SCOOP_REPO', 'XDG_CONFIG_HOME', 'QODER_CONFIG_DIR')
+        foreach ($name in $restoreProbeNames) {
+            [Environment]::SetEnvironmentVariable($name, 'zev-scoop-process-env-restore-probe', 'Process')
+        }
+        Restore-ProcessEnvironment
+        foreach ($name in $restoreProbeNames) {
+            $restoredValue = [Environment]::GetEnvironmentVariable($name, 'Process')
+            if ($restoredValue -cne $previousEnvironment[$name]) {
+                throw "Process environment restore probe failed for $name."
+            }
+        }
+        Write-Host 'PROCESS_ENV_RESTORE=PASS: tracked values and originally absent variables were restored.'
     }
     finally {
         try { Remove-TestRootSafely }
