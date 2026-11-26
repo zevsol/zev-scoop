@@ -26,34 +26,114 @@ jobs:
         id: history
         shell: pwsh
         run: |
-          $current = (Get-Content bucket/qoder-cli.json -Raw | ConvertFrom-Json).version
-          if ('${{ github.event_name }}' -eq 'pull_request') {
-            $source = 'origin/${{ github.base_ref }}:bucket/qoder-cli.json'
+          $currentManifest = Get-Content bucket/qoder-cli.json -Raw | ConvertFrom-Json
+          $current = [string]$currentManifest.version
+          if ([string]::IsNullOrWhiteSpace($current)) {
+            throw 'The current manifest has no version.'
+          }
+
+          $baselineCommit = $null
+          if ($env:GITHUB_EVENT_NAME -eq 'pull_request') {
+            $baseBranch = $env:GITHUB_BASE_REF
+            if ([string]::IsNullOrWhiteSpace($baseBranch)) {
+              throw 'GITHUB_BASE_REF is empty for a pull_request event.'
+            }
+            & git check-ref-format --branch $baseBranch | Out-Null
+            if ($LASTEXITCODE -ne 0) {
+              throw "Invalid pull request base branch name: $baseBranch"
+            }
+
+            $baseRef = "refs/remotes/origin/$baseBranch"
+            $refMatches = @(& git for-each-ref --format='%(refname)' --count=1 $baseRef)
+            if ($LASTEXITCODE -ne 0) {
+              throw "git for-each-ref failed while checking $baseRef (exit $LASTEXITCODE)."
+            }
+            if (-not $refMatches -or $refMatches[0] -cne $baseRef) {
+              throw "Expected fetched pull request base ref is missing: $baseRef"
+            }
+
+            $baselineCommit = (& git rev-parse --verify "$baseRef^{commit}") -join ''
+            if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($baselineCommit)) {
+              throw "git rev-parse could not resolve pull request base ref $baseRef (exit $LASTEXITCODE)."
+            }
           }
           else {
-            $source = 'HEAD^:bucket/qoder-cli.json'
+            $headInfo = @(& git rev-list --parents -n 1 HEAD)
+            if ($LASTEXITCODE -ne 0) {
+              throw "git rev-list failed while inspecting HEAD (exit $LASTEXITCODE)."
+            }
+            if ($headInfo.Count -ne 1) {
+              throw "git rev-list returned an unexpected result for HEAD: $($headInfo -join ' | ')"
+            }
+
+            $headParts = $headInfo[0] -split '\s+'
+            if ($headParts.Count -gt 1) {
+              $parentCommit = (& git rev-parse --verify "$($headParts[1])^{commit}") -join ''
+              if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($parentCommit)) {
+                throw "git rev-parse could not resolve the first parent of HEAD (exit $LASTEXITCODE)."
+              }
+              $baselineCommit = $parentCommit
+            }
           }
-          $previousJson = git show $source 2>$null
-          if ($LASTEXITCODE -eq 0) {
-            $previous = ($previousJson -join "`n") | ConvertFrom-Json
-            if ($previous.version -ne $current) {
-              $path = Join-Path $env:RUNNER_TEMP 'qoder-cli-previous.json'
-              [IO.File]::WriteAllText($path, ($previousJson -join "`n"), [Text.UTF8Encoding]::new($false))
-              "available=true" >> $env:GITHUB_OUTPUT
-              "previous_version=$($previous.version)" >> $env:GITHUB_OUTPUT
-              "current_version=$current" >> $env:GITHUB_OUTPUT
-              "manifest_path=$path" >> $env:GITHUB_OUTPUT
+
+          $reason = $null
+          $previous = $null
+          if (-not $baselineCommit) {
+            $reason = 'no-history'
+          }
+          else {
+            $treeEntries = @(& git ls-tree -r --name-only $baselineCommit -- 'bucket/qoder-cli.json')
+            if ($LASTEXITCODE -ne 0) {
+              throw "git ls-tree failed for baseline $baselineCommit (exit $LASTEXITCODE)."
+            }
+            if ($treeEntries -cnotcontains 'bucket/qoder-cli.json') {
+              $reason = 'no-history'
             }
             else {
-              "available=false" >> $env:GITHUB_OUTPUT
-              "reason=same-version" >> $env:GITHUB_OUTPUT
+              $manifestObject = "$($baselineCommit):bucket/qoder-cli.json"
+              $previousJson = (& git show $manifestObject) -join "`n"
+              if ($LASTEXITCODE -ne 0) {
+                throw "git show failed for confirmed historical manifest $manifestObject (exit $LASTEXITCODE)."
+              }
+              try {
+                $previous = $previousJson | ConvertFrom-Json -ErrorAction Stop
+              }
+              catch {
+                throw "Historical manifest at $manifestObject is not valid JSON: $($_.Exception.Message)"
+              }
+              if ([string]::IsNullOrWhiteSpace([string]$previous.version)) {
+                throw "Historical manifest at $manifestObject has no version."
+              }
+              if ([string]$previous.version -eq $current) {
+                $reason = 'same-version'
+              }
             }
           }
+
+          if ($reason) {
+            $outputLines = @(
+              'available=false',
+              "reason=$reason",
+              "previous_version=$(if ($previous) { [string]$previous.version } else { 'none' })",
+              "current_version=$current"
+            )
+            Add-Content -LiteralPath $env:GITHUB_OUTPUT -Value $outputLines
+            Write-Host "HISTORY=SKIPPED: $reason; current=$current"
+          }
           else {
-            "available=false" >> $env:GITHUB_OUTPUT
-            "reason=no-history" >> $env:GITHUB_OUTPUT
+            $path = Join-Path $env:RUNNER_TEMP 'qoder-cli-previous.json'
+            [IO.File]::WriteAllText($path, $previousJson, [Text.UTF8Encoding]::new($false))
+            $outputLines = @(
+              'available=true',
+              "previous_version=$([string]$previous.version)",
+              "current_version=$current",
+              "manifest_path=$path"
+            )
+            Add-Content -LiteralPath $env:GITHUB_OUTPUT -Value $outputLines
+            Write-Host "HISTORY=AVAILABLE: $([string]$previous.version) -> $current; manifest=$path"
           }
       - name: Test current manifest install, command, path, and uninstall
+        if: ${{ !cancelled() && (success() || steps.history.conclusion == 'failure') }}
         shell: pwsh
         run: ./scripts/test-scoop.ps1 -Mode Install
       - name: Test upgrade from historical official package
