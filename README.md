@@ -14,7 +14,7 @@ Scoop 将应用安装到用户目录并通过 shim 管理命令，便于不依�
 
 | Package | Category | Platform | Status |
 |---|---|---|---|
-| [Qoder CLI](docs/packages/qoder-cli.md) (`qoder-cli`) | AI / CLI | Windows x64 | Manifest 已实现；本地隔离验证通过，GitHub 生命周期验证待完成 |
+| [Qoder CLI](docs/packages/qoder-cli.md) (`qoder-cli`) | AI / CLI | Windows x64 | Manifest 已实现；本地验证和 GitHub 安装生命周期验证通过 |
 | Qoder IDE (`qoder-ide`) | AI / Desktop | Windows | Planned，尚未调查 |
 | Codex CLI (`codex-cli`) | AI / CLI | Windows | Planned，尚未调查 |
 | Gemini CLI (`gemini-cli`) | AI / CLI | Windows | Planned，尚未调查 |
@@ -78,7 +78,7 @@ Manual Review & Merge
 
 **当前适用范围：**版本发现和 Manifest 更新代码是 Qoder CLI 专用适配器，不是可供任意软件直接使用的通用更新引擎。其他软件将根据各自官方发布机制增加独立适配逻辑；共用的通用框架尚未实现。
 
-**验证状态：**本地 Manifest、官方 x64 下载及 SHA256 已验证；PowerShell 5.1/7.7 下 JSON（18 项）、Junction 清理和环境隔离测试通过。历史 GitHub CI 中，Validate bucket manifests 通过；Test Qoder CLI 在 Bootstrap 参数传递阶段失败，Qoder 生命周期未完成，升级因无不同历史版本而跳过。最新本地修复尚未推送，远程 Windows 生命周期验收待完成。详见 [Qoder CLI 包说明](docs/packages/qoder-cli.md) 和 [来源调查报告](docs/qoder-cli-source-audit.md)。
+**验证状态：**本地 Manifest、官方 x64 下载及 SHA256 已验证；PowerShell 5.1/7.7 下 JSON（18 项）、Junction 清理和环境隔离测试通过。最新 GitHub Actions 中 Validate bucket manifests 与 Windows 当前版本生命周期测试均通过，覆盖安装、SHA256、命令、Shim 路径和卸载；因无不同历史版本，升级测试跳过。隔离 Scoop 根目录已清理；Qoder 可能在 Runner TEMP 外创建的原生依赖缓存未单独清理，Job 使用的 GitHub-hosted Runner 会在任务结束后回收。详见 [Qoder CLI 包说明](docs/packages/qoder-cli.md) 和 [来源调查报告](docs/qoder-cli-source-audit.md)。
 
 ## 仓库结构
 
