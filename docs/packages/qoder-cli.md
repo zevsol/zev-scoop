@@ -7,7 +7,7 @@
 | Category | AI / CLI |
 | Current architecture | Windows x64 |
 | Manifest | [`bucket/qoder-cli.json`](../../bucket/qoder-cli.json) |
-| Status | Manifest implemented; Windows lifecycle workflow is available but has not yet run against GitHub Actions. |
+| Status | Manifest implemented; latest local test-script checks pass, but the current lifecycle fix has not yet been verified by GitHub Actions. |
 
 ## Install and manage
 
@@ -26,7 +26,7 @@ Scoop uninstallation removes the package files and shim. It does not delete Qode
 
 Qoder recommends its native standalone CLI distribution through its [Installation and Upgrade guide](https://docs.qoder.com/cli/installation). This package downloads the versioned Windows x64 ZIP directly from the official Qoder host, without running `install.ps1`. The official channel provides the latest version, artifact URL and SHA256. The updater downloads the archive, recalculates SHA256, checks the archive structure, and only then replaces the manifest.
 
-The official installer script extracts the same standalone executable and invokes `qodercli.exe install --force`. The Scoop package instead lets Scoop own the downloaded binary and exposes `qodercli.exe` as the `qoder` shim. The Windows lifecycle workflow must confirm this direct-manifest approach on a hosted runner before its behavior can be considered verified.
+The official installer script extracts the same standalone executable and invokes `qodercli.exe install --force`. The Scoop package instead lets Scoop own the downloaded binary and exposes `qodercli.exe` as the `qoder` shim. The direct-manifest lifecycle has not yet completed successfully on a hosted runner.
 
 ## Architecture and Windows requirements
 
@@ -46,7 +46,10 @@ The lifecycle test sets `QODER_CONFIG_DIR` to a unique directory under its tempo
 
 - The manifest has passed the official Scoop JSON schema check, local URL/field validation, and local Python tests.
 - The current official package hash and archive layout were checked locally.
-- Actual Scoop install, `qoder --version`, `qoder --help`, executable path, and uninstall checks run in `.github/workflows/test-qoder-cli.yml`; this workflow has not yet run because the GitHub repository has no commits. The test configures the documented temporary Qoder settings directory as described above; runtime confirmation remains pending.
+- GitHub Actions history: [Validate bucket manifests](https://github.com/zevsol/zev-scoop/actions/runs/45805498069) passed. [Test Qoder CLI](https://github.com/zevsol/zev-scoop/actions/runs/45805498015) failed while passing the excluded Scoop paths to the Scoop bootstrap process. The failure occurred before the Qoder installation lifecycle completed; it does not establish that installation, command checks, or uninstall passed. The upgrade check was skipped because no distinct historical version was available.
+- Persisted local logs in `test-logs/` record earlier JSON transport (18 cases) and standard Junction cleanup runs under Windows PowerShell 5.1 and PowerShell 7.7. They predate the latest TOCTOU replacement test and do not contain its result.
+- The latest local TOCTOU replacement test and rerun of the JSON and standard Junction checks passed under both PowerShell versions; those results were captured in the test execution output but were not written to persistent log files. Local checks do not verify the current changes on GitHub Actions.
+- Actual Scoop install, `qoder --version`, `qoder --help`, executable path, and uninstall checks are defined in `.github/workflows/test-qoder-cli.yml`, but remote Windows lifecycle verification of the current local changes remains pending. The test configures the documented temporary Qoder settings directory as described above; runtime confirmation that the CLI honors this setting also remains pending.
 - Scoop's unique test root is removed by the test script. Qoder may also create a `qodercli-natives-*` dependency cache in the Windows TEMP directory outside that root. The script does not attempt broad TEMP cleanup and reports `CLEANUP=PARTIAL` when the Scoop root is removed but this external cache is unmanaged. The workflow uses a GitHub-hosted Windows runner; GitHub provisions a VM per job and decommissions it after the job ([runner lifecycle](https://docs.github.com/en/actions/how-tos/manage-runners/github-hosted-runners/use-github-hosted-runners)).
 - A real upgrade is reported separately and runs only when a distinct historical Manifest is available and that versioned artifact can still be downloaded. Otherwise the upgrade check is marked skipped.
 - No upstream signature file was found; checksum trust relies on the official HTTPS release channel.
