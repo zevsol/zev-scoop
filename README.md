@@ -14,12 +14,15 @@ Scoop 将应用安装到用户目录并通过 shim 管理命令，便于不依�
 
 | Package | Category | Platform | Status |
 |---|---|---|---|
-| [Qoder CLI](docs/packages/qoder-cli.md) (`qoder-cli`) | AI / CLI | Windows x64 | Manifest 已实现；本地验证和 GitHub 安装生命周期验证通过 |
+| [Qoder CLI](docs/packages/qoder-cli.md) (`qoder-cli`) | AI / CLI | Windows x64 | Implemented；GitHub-hosted Windows 生命周期测试通过 |
+| [Qoder CN CLI](docs/packages/qoder-cn-cli.md) (`qoder-cn-cli`) | AI / CLI | Windows x64 | 本地安装、命令、卸载和重装 PASS；GitHub Runner 验收待运行 |
+| [Antigravity CLI](docs/packages/antigravity-cli.md) (`antigravity-cli`) | AI / CLI | Windows x64 / ARM64 | 本地 x64 安装、命令、卸载和重装 PASS；ARM64 与 GitHub Runner 验收待验证 |
+| [Antigravity IDE (Standalone)](docs/packages/antigravity-ide.md) | AI / Desktop | Windows x64 / ARM64 | BLOCKED；官方安装器已静态核实，但 Scoop 可控的静默、卸载和自更新生命周期尚未验证，未提供 Manifest |
 | Qoder IDE (`qoder-ide`) | AI / Desktop | Windows | Planned，尚未调查 |
 | Codex CLI (`codex-cli`) | AI / CLI | Windows | Planned，尚未调查 |
 | Gemini CLI (`gemini-cli`) | AI / CLI | Windows | Planned，尚未调查 |
 
-目录中的 Planned 项目仅用于展示方向，并不代表已有 Manifest 或安装支持。
+目录中的 Planned 项目仅用于展示方向，并不代表已有 Manifest 或安装支持。Antigravity IDE Standalone 的官方安装包和签名已经静态调查；在 Scoop 能可靠控制安装、卸载和自动更新之前不纳入 Bucket。
 
 ## 快速开始
 
@@ -29,10 +32,12 @@ Scoop 将应用安装到用户目录并通过 shim 管理命令，便于不依�
 scoop bucket add zev https://github.com/zevsol/zev-scoop
 ```
 
-安装当前实现的软件：
+安装当前已实现的软件包：
 
 ```powershell
 scoop install zev/qoder-cli
+scoop install zev/qoder-cn-cli
+scoop install zev/antigravity-cli
 ```
 
 更新或卸载：
@@ -40,7 +45,11 @@ scoop install zev/qoder-cli
 ```powershell
 scoop update
 scoop update qoder-cli
+scoop update qoder-cn-cli
+scoop update antigravity-cli
 scoop uninstall qoder-cli
+scoop uninstall qoder-cn-cli
+scoop uninstall antigravity-cli
 ```
 
 ## 软件类别
@@ -74,11 +83,11 @@ GitHub Pull Request
 Manual Review & Merge
 ```
 
-**已实现：**Qoder CLI 的官方版本检测、下载与 SHA256 校验、Manifest 更新、格式/规则验证，以及隔离 Windows runner 上的生命周期测试入口。更新工作流只有在候选版本和测试通过后才创建 PR，保留人工审核，不自动合并。
+**已实现：**Qoder CLI、Qoder CN CLI 和 Antigravity CLI 各自独立的官方版本检测/校验适配器、Manifest 更新及 Windows runner 生命周期测试入口。更新工作流只在候选包校验和安装测试通过后创建 PR，保留人工审核，不自动合并。
 
-**当前适用范围：**版本发现和 Manifest 更新代码是 Qoder CLI 专用适配器，不是可供任意软件直接使用的通用更新引擎。其他软件将根据各自官方发布机制增加独立适配逻辑；共用的通用框架尚未实现。
+**当前适用范围：**版本发现和 Manifest 更新代码按软件包分别实现；这些适配器不是可供任意软件直接使用的通用更新引擎。桌面应用的安装/卸载方式也须逐包核实，Antigravity IDE Standalone 当前未进入 Bucket。
 
-**验证状态：**本地 Manifest、官方 x64 下载及 SHA256 已验证；PowerShell 5.1/7.7 下 JSON（18 项）、Junction 清理和环境隔离测试通过。最新 GitHub Actions 中 Validate bucket manifests 与 Windows 当前版本生命周期测试均通过，覆盖安装、SHA256、命令、Shim 路径和卸载；因无不同历史版本，升级测试跳过。隔离 Scoop 根目录已清理；Qoder 可能在 Runner TEMP 外创建的原生依赖缓存未单独清理，Job 使用的 GitHub-hosted Runner 会在任务结束后回收。详见 [Qoder CLI 包说明](docs/packages/qoder-cli.md) 和 [来源调查报告](docs/qoder-cli-source-audit.md)。
+**验证状态：**Qoder CLI 已有本地及 GitHub-hosted Windows 生命周期验证。Qoder CN CLI 已在本地隔离 Scoop 环境完成安装、版本/帮助命令、配置隔离、卸载和重装；Antigravity CLI 已在本地隔离环境完成 x64 安装、版本/帮助命令、配置隔离、卸载和重装。两者的 GitHub-hosted Windows CI 尚未运行。Antigravity IDE Standalone 已做官方安装包静态调查，没有 Manifest，也没有执行安装器。各包的证据和限制见对应包文档。
 
 ## 仓库结构
 

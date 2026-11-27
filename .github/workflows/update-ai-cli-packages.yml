@@ -1,0 +1,96 @@
+name: Update AI CLI packages
+
+on:
+  schedule:
+    - cron: '41 3 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: update-ai-cli-${{ matrix.package }}
+  cancel-in-progress: false
+
+jobs:
+  update-test-pr:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - package: qoder-cn-cli
+            updater: update-qoder-cn-cli.py
+          - package: antigravity-cli
+            updater: update-antigravity-cli.py
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0
+      - name: Check official release and verify package hashes
+        id: update
+        shell: pwsh
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          $manifestPath = "bucket/${{ matrix.package }}.json"
+          $before = [string](Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json).version
+          $previousPath = Join-Path $env:RUNNER_TEMP "${{ matrix.package }}-previous.json"
+          Copy-Item -LiteralPath $manifestPath -Destination $previousPath
+          python "scripts/${{ matrix.updater }}"
+          if ($LASTEXITCODE -ne 0) { throw 'Official update adapter failed verification.' }
+          $after = [string](Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json).version
+          "changed=$($before -ne $after)" >> $env:GITHUB_OUTPUT
+          "old_version=$before" >> $env:GITHUB_OUTPUT
+          "new_version=$after" >> $env:GITHUB_OUTPUT
+          "previous_manifest=$previousPath" >> $env:GITHUB_OUTPUT
+      - name: Validate manifests and unit tests
+        if: steps.update.outputs.changed == 'true'
+        shell: pwsh
+        run: |
+          python scripts/validate-manifest.py --all --check-url
+          if ($LASTEXITCODE -ne 0) { throw 'Manifest validation failed.' }
+          python -m unittest discover -s tests -v
+          if ($LASTEXITCODE -ne 0) { throw 'Python unit tests failed.' }
+      - name: Test fresh Windows install and uninstall
+        if: steps.update.outputs.changed == 'true'
+        shell: pwsh
+        run: ./scripts/test-scoop.ps1 -Mode Install -Package '${{ matrix.package }}'
+      - name: Test real upgrade from prior official version
+        if: steps.update.outputs.changed == 'true'
+        shell: pwsh
+        run: ./scripts/test-scoop.ps1 -Mode Upgrade -Package '${{ matrix.package }}' -PreviousManifestPath '${{ steps.update.outputs.previous_manifest }}'
+      - name: Create review PR after verification
+        if: steps.update.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: pwsh
+        run: |
+          $package = '${{ matrix.package }}'
+          $old = '${{ steps.update.outputs.old_version }}'
+          $new = '${{ steps.update.outputs.new_version }}'
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          $branch = "automation/$package-$new"
+          git switch -c $branch
+          git add "bucket/$package.json"
+          git commit -m "chore($package): update $old to $new"
+          git push --set-upstream origin $branch
+          $manifest = Get-Content -LiteralPath "bucket/$package.json" -Raw | ConvertFrom-Json
+          $sources = foreach ($arch in $manifest.architecture.PSObject.Properties) {
+            "- $($arch.Name): $($arch.Value.url) (SHA256: ``$($arch.Value.hash)``)"
+          }
+          $body = @"
+          ## $package update
+
+          - Version: $old → $new
+          - Official sources and SHA256:
+          $($sources -join "`n")
+          - Verification: official release metadata matched downloaded artifacts; archive checks, manifest validation, unit tests, Windows install/command/path/uninstall, and a real upgrade from $old passed.
+
+          This PR is for manual review and is not auto-merged.
+          "@
+          $bodyPath = Join-Path $env:RUNNER_TEMP "$package-pr-body.md"
+          Set-Content -LiteralPath $bodyPath -Value $body -Encoding utf8
+          gh pr create --title "chore($package): update $old to $new" --body-file $bodyPath

@@ -16,9 +16,18 @@ jobs:
       - name: Validate current manifests and maintenance scripts
         shell: pwsh
         run: |
-          python -m py_compile scripts/update-qoder.py scripts/validate-manifest.py
+          $schemaPath = Join-Path $env:RUNNER_TEMP 'scoop-schema.json'
+          Invoke-WebRequest -Uri 'https://raw.githubusercontent.com/ScoopInstaller/Scoop/master/schema.json' -OutFile $schemaPath
+          foreach ($manifestPath in Get-ChildItem bucket -Filter '*.json') {
+            $manifestJson = Get-Content -LiteralPath $manifestPath.FullName -Raw
+            if (-not (Test-Json -Json $manifestJson -SchemaFile $schemaPath)) {
+              throw "Official Scoop schema validation failed: $($manifestPath.Name)"
+            }
+            Write-Host "Scoop schema PASS: $($manifestPath.Name)"
+          }
+          python -m py_compile scripts/update-qoder.py scripts/update-qoder-cn-cli.py scripts/update-antigravity-cli.py scripts/validate-manifest.py
           if ($LASTEXITCODE -ne 0) { throw 'Python syntax check failed.' }
-          python scripts/validate-manifest.py --check-url
-          if ($LASTEXITCODE -ne 0) { throw 'Qoder CLI manifest validation failed.' }
+          python scripts/validate-manifest.py --all --check-url
+          if ($LASTEXITCODE -ne 0) { throw 'Bucket manifest validation failed.' }
           python -m unittest discover -s tests -v
           if ($LASTEXITCODE -ne 0) { throw 'Python unit tests failed.' }

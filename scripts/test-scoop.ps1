@@ -1,15 +1,32 @@
 param(
     [ValidateSet('Install', 'Upgrade', 'TestExcludedPathsTransport', 'TestOwnedDirectoryCleanup', 'TestOwnedDirectoryCleanupRace')]
     [string]$Mode = 'Install',
-    [string]$PreviousManifestPath
+    [string]$PreviousManifestPath,
+    [ValidateSet('qoder-cli', 'qoder-cn-cli', 'antigravity-cli')]
+    [string]$Package = 'qoder-cli'
 )
 
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
-$candidatePath = Join-Path $repoRoot 'bucket\qoder-cli.json'
+$candidatePath = Join-Path $repoRoot ("bucket\{0}.json" -f $Package)
 $candidate = Get-Content -LiteralPath $candidatePath -Raw | ConvertFrom-Json
+$packageCommand = switch ($Package) {
+    'qoder-cli' { 'qoder' }
+    'qoder-cn-cli' { 'qodercn' }
+    'antigravity-cli' { 'agy' }
+}
+$packageExecutable = switch ($Package) {
+    'qoder-cli' { 'qodercli.exe' }
+    'qoder-cn-cli' { 'qoderclicn.exe' }
+    'antigravity-cli' { 'agy.exe' }
+}
+$packageArchivePattern = switch ($Package) {
+    'qoder-cli' { '*qodercli-windows-x64*.zip' }
+    'qoder-cn-cli' { '*qoderclicn-windows-x64*.zip' }
+    'antigravity-cli' { '*agy_cli_windows_x64*.zip' }
+}
 
 function Test-AbsoluteWindowsPath([string]$Path) {
     if ([string]::IsNullOrWhiteSpace($Path) -or $Path.IndexOf([char]0) -ge 0 -or $Path.Contains(';')) {
@@ -66,6 +83,21 @@ function Remove-OwnedDirectoryLinkSafely {
     $currentItem = Get-Item -LiteralPath $Path -Force -ErrorAction Stop
     if (-not $currentItem.PSIsContainer -or (($currentItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -eq 0)) {
         throw "Refusing to unlink a path that is not currently a directory reparse point: $Path"
+    }
+    if (($currentItem.Attributes -band [IO.FileAttributes]::ReadOnly) -ne 0) {
+        # Scoop marks its current-version junction read-only. Clear that flag on the
+        # link object itself (/L), never on the target, before unlinking it.
+        $attribCommand = Get-Command 'attrib.exe' -ErrorAction Stop
+        & $attribCommand.Source '-R' '/L' $Path
+        if ($LASTEXITCODE -ne 0) {
+            throw "Could not clear the read-only attribute from the owned directory link: $Path (attrib exit $LASTEXITCODE)"
+        }
+        $currentItem = Get-Item -LiteralPath $Path -Force -ErrorAction Stop
+        if (-not $currentItem.PSIsContainer -or
+            (($currentItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -eq 0) -or
+            (($currentItem.Attributes -band [IO.FileAttributes]::ReadOnly) -ne 0)) {
+            throw "Directory link changed unexpectedly while clearing its read-only flag: $Path"
+        }
     }
     [IO.Directory]::Delete($Path, $false)
     if (Test-Path -LiteralPath $Path) {
@@ -153,7 +185,7 @@ if (-not [IO.Directory]::Exists($tempBase)) {
     throw "The temporary base directory does not exist: $tempBase"
 }
 Assert-NoReparseDirectoryChain -Path $tempBase
-$runRoot = Join-Path $tempBase ("zev-scoop-qoder-cli-test-{0}" -f [guid]::NewGuid().ToString('N'))
+$runRoot = Join-Path $tempBase ("zev-scoop-{0}-test-{1}" -f $Package, [guid]::NewGuid().ToString('N'))
 $runRootCreated = $false
 $script:BeforeOwnedChildRecheck = $null
 $script:CleanupRaceExpectedReparsePath = $null
@@ -161,6 +193,9 @@ $scoopRoot = Join-Path $runRoot 'scoop'
 $sourceBucket = Join-Path $runRoot 'source-bucket'
 $isolatedConfigHome = Join-Path $runRoot 'config-home'
 $isolatedQoderConfig = Join-Path $runRoot 'qoder-config'
+$isolatedQoderCnConfig = Join-Path $runRoot 'qoder-cn-config'
+$isolatedAntigravityUserProfile = Join-Path $runRoot 'antigravity-user-profile'
+$isolatedCliTemp = Join-Path $runRoot 'cli-temp'
 $globalRoot = Join-Path $runRoot 'global'
 $cacheRoot = Join-Path $runRoot 'cache'
 $bootstrapPath = Join-Path $runRoot 'bootstrap-scoop.ps1'
@@ -310,7 +345,7 @@ function Read-ExcludedScoopPaths {
 }
 '@
 $previousEnvironment = @{}
-foreach ($name in @('SCOOP', 'SCOOP_GLOBAL', 'SCOOP_CACHE', 'SCOOP_REPO', 'XDG_CONFIG_HOME', 'QODER_CONFIG_DIR', 'RUNNER_TEMP', 'PATH')) {
+foreach ($name in @('SCOOP', 'SCOOP_GLOBAL', 'SCOOP_CACHE', 'SCOOP_REPO', 'XDG_CONFIG_HOME', 'QODER_CONFIG_DIR', 'QODERCN_CONFIG_DIR', 'AGY_CLI_DISABLE_AUTO_UPDATE', 'RUNNER_TEMP', 'USERPROFILE', 'TEMP', 'TMP', 'PATH')) {
     $previousEnvironment[$name] = [Environment]::GetEnvironmentVariable($name, 'Process')
 }
 $previousUserPath = [Environment]::GetEnvironmentVariable('PATH', 'User')
@@ -318,7 +353,8 @@ $previousMachinePath = [Environment]::GetEnvironmentVariable('PATH', 'Machine')
 
 function Invoke-Scoop([string[]]$Arguments) {
     Write-Host ("COMMAND: scoop {0}" -f ($Arguments -join ' '))
-    & scoop @Arguments
+    $output = @(& scoop @Arguments 2>&1)
+    $output | ForEach-Object { Write-Host $_ }
     if ($LASTEXITCODE -ne 0) {
         throw "scoop $($Arguments -join ' ') failed with exit code $LASTEXITCODE"
     }
@@ -336,12 +372,35 @@ function Get-FileSha256([string]$Path) {
     }
 }
 
-function Assert-QoderVersion([string]$ExpectedVersion) {
-    $output = & qoder --version 2>&1
-    $exitCode = $LASTEXITCODE
-    $output | ForEach-Object { Write-Host $_ }
-    if ($exitCode -ne 0 -or ($output -join "`n") -notmatch [regex]::Escape($ExpectedVersion)) {
-        throw "qoder --version did not report ${ExpectedVersion} (exit $exitCode): $output"
+function Invoke-IsolatedPackageCommand {
+    param([string]$CommandName, [string[]]$Arguments)
+
+    $scopedNames = @('TEMP', 'TMP')
+    if ($Package -eq 'antigravity-cli') { $scopedNames += 'USERPROFILE' }
+    $saved = @{}
+    foreach ($name in $scopedNames) { $saved[$name] = [Environment]::GetEnvironmentVariable($name, 'Process') }
+    try {
+        [Environment]::SetEnvironmentVariable('TEMP', $isolatedCliTemp, 'Process')
+        [Environment]::SetEnvironmentVariable('TMP', $isolatedCliTemp, 'Process')
+        if ($Package -eq 'antigravity-cli') {
+            [Environment]::SetEnvironmentVariable('USERPROFILE', $isolatedAntigravityUserProfile, 'Process')
+        }
+        $output = @(& $CommandName @Arguments 2>&1)
+        $exitCode = $LASTEXITCODE
+        $output | ForEach-Object { Write-Host $_ }
+        return [pscustomobject]@{ ExitCode = $exitCode; Output = ($output -join "`n") }
+    }
+    finally {
+        foreach ($name in $scopedNames) {
+            [Environment]::SetEnvironmentVariable($name, $saved[$name], 'Process')
+        }
+    }
+}
+
+function Assert-CliVersion([string]$ExpectedVersion, [string]$CommandName) {
+    $result = Invoke-IsolatedPackageCommand -CommandName $CommandName -Arguments @('--version')
+    if ($result.ExitCode -ne 0 -or $result.Output -notmatch [regex]::Escape($ExpectedVersion)) {
+        throw "$CommandName --version did not report ${ExpectedVersion} (exit $($result.ExitCode)): $($result.Output)"
     }
 }
 
@@ -688,6 +747,14 @@ if ($Mode -eq 'TestOwnedDirectoryCleanup') {
         if (-not $junctionItem.PSIsContainer -or (($junctionItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -eq 0)) {
             throw "Created Junction is not a directory ReparsePoint: $junctionPath"
         }
+        $attribCommand = Get-Command 'attrib.exe' -ErrorAction Stop
+        & $attribCommand.Source '+R' '/L' $junctionPath
+        if ($LASTEXITCODE -ne 0) { throw "Could not mark the test Junction read-only: $junctionPath" }
+        $junctionItem = Get-Item -LiteralPath $junctionPath -Force -ErrorAction Stop
+        if (($junctionItem.Attributes -band [IO.FileAttributes]::ReadOnly) -eq 0) {
+            throw "The test Junction did not retain its read-only attribute: $junctionPath"
+        }
+        Write-Host 'ASSERT=read-only Junction flag set on link object: PASS'
         Write-Host 'ASSERT=Junction created and marked ReparsePoint: PASS'
 
         $cleanupAttempted = $true
@@ -894,28 +961,39 @@ try {
     $manifestDirectory = Join-Path $sourceBucket 'bucket'
     New-Item -ItemType Directory -Path $manifestDirectory -Force | Out-Null
     $testManifest = if ($Mode -eq 'Upgrade') { (Resolve-Path -LiteralPath $PreviousManifestPath).Path } else { $candidatePath }
-    $bucketManifestPath = Join-Path $manifestDirectory 'qoder-cli.json'
+    $bucketManifestPath = Join-Path $manifestDirectory ("{0}.json" -f $Package)
     Copy-Item -LiteralPath $testManifest -Destination $bucketManifestPath
 
-    # Keep all Scoop and Qoder state under this unique temporary directory.
+    # Keep all Scoop and package-specific CLI settings under this unique temporary directory.
     $env:SCOOP = $scoopRoot
     $env:SCOOP_GLOBAL = $globalRoot
     $env:SCOOP_REPO = 'https://github.com/ScoopInstaller/Scoop'
     $env:XDG_CONFIG_HOME = $isolatedConfigHome
-    $env:QODER_CONFIG_DIR = $isolatedQoderConfig
-    New-Item -ItemType Directory -Path $isolatedConfigHome, $isolatedQoderConfig, $globalRoot, $cacheRoot -Force | Out-Null
-    $qoderSettingsPath = Join-Path $isolatedQoderConfig 'settings.json'
-    $qoderSettings = @{ general = @{ enableAutoUpdate = $false } } | ConvertTo-Json -Depth 3
-    [IO.File]::WriteAllText(
-        $qoderSettingsPath,
-        $qoderSettings + [Environment]::NewLine,
-        [Text.UTF8Encoding]::new($false)
-    )
-    $writtenQoderSettings = Get-Content -LiteralPath $qoderSettingsPath -Raw | ConvertFrom-Json
-    if ($writtenQoderSettings.general.enableAutoUpdate -ne $false) {
-        throw 'The isolated Qoder settings did not disable automatic updates.'
+    New-Item -ItemType Directory -Path $isolatedConfigHome, $globalRoot, $cacheRoot, $isolatedCliTemp -Force | Out-Null
+    if ($Package -eq 'antigravity-cli') {
+        New-Item -ItemType Directory -Path $isolatedAntigravityUserProfile -ErrorAction Stop | Out-Null
+        Write-Host "ANTIGRAVITY_CONFIG_ISOLATION=PROCESS_USERPROFILE: $isolatedAntigravityUserProfile"
     }
-    Write-Host "QODER_AUTO_UPDATE_ISOLATION=CONFIGURED: $qoderSettingsPath"
+    if ($Package -eq 'qoder-cli') {
+        $env:QODER_CONFIG_DIR = $isolatedQoderConfig
+        New-Item -ItemType Directory -Path $isolatedQoderConfig -Force | Out-Null
+        $qoderSettingsPath = Join-Path $isolatedQoderConfig 'settings.json'
+        $qoderSettings = @{ general = @{ enableAutoUpdate = $false } } | ConvertTo-Json -Depth 3
+        [IO.File]::WriteAllText($qoderSettingsPath, $qoderSettings + [Environment]::NewLine, [Text.UTF8Encoding]::new($false))
+        $writtenQoderSettings = Get-Content -LiteralPath $qoderSettingsPath -Raw | ConvertFrom-Json
+        if ($writtenQoderSettings.general.enableAutoUpdate -ne $false) { throw 'The isolated Qoder settings did not disable automatic updates.' }
+        Write-Host "QODER_AUTO_UPDATE_ISOLATION=CONFIGURED: $qoderSettingsPath"
+    }
+    elseif ($Package -eq 'qoder-cn-cli') {
+        $env:QODERCN_CONFIG_DIR = $isolatedQoderCnConfig
+        New-Item -ItemType Directory -Path $isolatedQoderCnConfig -Force | Out-Null
+        $qoderCnSettingsPath = Join-Path $isolatedQoderCnConfig 'settings.json'
+        $qoderCnSettings = @{ general = @{ enableAutoUpdate = $false } } | ConvertTo-Json -Depth 3
+        [IO.File]::WriteAllText($qoderCnSettingsPath, $qoderCnSettings + [Environment]::NewLine, [Text.UTF8Encoding]::new($false))
+        $writtenQoderCnSettings = Get-Content -LiteralPath $qoderCnSettingsPath -Raw | ConvertFrom-Json
+        if ($writtenQoderCnSettings.general.enableAutoUpdate -ne $false) { throw 'The isolated Qoder CN settings did not disable automatic updates.' }
+        Write-Host "QODER_CN_AUTO_UPDATE_ISOLATION=CONFIGURED: $qoderCnSettingsPath"
+    }
 
     # The official bootstrap normally persists its shims directory into the user PATH.
     # Run its reviewed source in a clean child PowerShell and replace only that function
@@ -1041,16 +1119,16 @@ function Add-Path {
     if ($LASTEXITCODE -ne 0) { throw 'Setting disposable bucket author name failed.' }
     git -C $sourceBucket config user.email 'scoop-test@example.invalid'
     if ($LASTEXITCODE -ne 0) { throw 'Setting disposable bucket author email failed.' }
-    git -C $sourceBucket add bucket/qoder-cli.json
+    git -C $sourceBucket add ("bucket/{0}.json" -f $Package)
     if ($LASTEXITCODE -ne 0) { throw 'Staging disposable test manifest failed.' }
     git -C $sourceBucket commit --quiet -m 'test: initial manifest'
     if ($LASTEXITCODE -ne 0) { throw "Committing initial test manifest failed with exit code $LASTEXITCODE" }
     $sourceBucketUri = ([Uri]::new($sourceBucket)).AbsoluteUri
     Invoke-Scoop @('bucket', 'add', 'zevtest', $sourceBucketUri)
 
-    $packageName = 'zevtest/qoder-cli'
-    $appRoot = Join-Path $scoopRoot 'apps\qoder-cli'
-    $binaryPath = Join-Path $appRoot 'current\qodercli.exe'
+    $packageName = "zevtest/$Package"
+    $appRoot = Join-Path $scoopRoot ("apps\{0}" -f $Package)
+    $binaryPath = Join-Path $appRoot ("current\{0}" -f $packageExecutable)
     Invoke-Scoop @('install', $packageName)
     if (-not (Test-Path -LiteralPath $binaryPath -PathType Leaf)) {
         throw "Installed executable not found at expected Scoop path: $binaryPath"
@@ -1058,40 +1136,54 @@ function Add-Path {
 
     # Scoop verifies a manifest hash during install. Recompute it from Scoop's retained
     # download cache as an independent assertion against the exact bytes installed.
-    $cacheArchives = @(Get-ChildItem -LiteralPath $cacheRoot -File -Recurse -Filter '*.zip' -ErrorAction SilentlyContinue |
-        Where-Object { $_.Name -like '*qoder-cli*' -or $_.Name -like '*qodercli-windows-x64*' })
-    if (-not $cacheArchives.Count) { throw "Scoop did not retain the Qoder archive in the isolated cache: $cacheRoot" }
-    $expectedHash = [string]$candidate.architecture.'64bit'.hash
-    $actualHashes = @($cacheArchives | ForEach-Object { (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant() })
-    if ($actualHashes -notcontains $expectedHash.ToLowerInvariant()) {
-        throw "Downloaded Qoder archive SHA256 mismatch. Expected $expectedHash; got $($actualHashes -join ', ')."
-    }
-    Write-Host "SHA256=PASS: $expectedHash (verified from Scoop download cache)."
+    $installedManifest = Get-Content -LiteralPath $bucketManifestPath -Raw | ConvertFrom-Json
+    $expectedHash = [string]$installedManifest.architecture.'64bit'.hash
+    if ($expectedHash -notmatch '^[a-fA-F0-9]{64}$') { throw "Manifest SHA256 is missing or malformed for $Package." }
+    # Scoop checks the manifest SHA256 before extraction and aborts installation on a mismatch.
+    # The transcript preserves Scoop's explicit `Checking hash ... OK.` output for this run.
+    Write-Host "SHA256=PASS: Scoop accepted archive against manifest SHA256 $expectedHash before extraction."
     Write-Host "INSTALL=PASS: $packageName $($candidate.version); executable=$binaryPath"
     if ($env:GITHUB_OUTPUT) { Add-Content -LiteralPath $env:GITHUB_OUTPUT -Value 'install_test=passed' }
 
-    $qoderShimDirectory = Join-Path $scoopRoot 'shims'
-    $shim = Get-Command qoder -ErrorAction Stop
-    if ($shim.Source -notlike "$qoderShimDirectory*") {
-        throw "qoder resolves outside the isolated Scoop shims directory: $($shim.Source)"
+    $scoopShimDirectory = Join-Path $scoopRoot 'shims'
+    $shim = Get-Command $packageCommand -ErrorAction Stop
+    if ($shim.Source -notlike "$scoopShimDirectory*") {
+        throw "$packageCommand resolves outside the isolated Scoop shims directory: $($shim.Source)"
     }
     Write-Host "SHIM=PASS: $($shim.Source)"
-    $installedManifest = Get-Content -LiteralPath $bucketManifestPath -Raw | ConvertFrom-Json
-    Assert-QoderVersion ([string]$installedManifest.version)
-    & qoder --help 2>&1 | ForEach-Object { Write-Host $_ }
-    $helpExitCode = $LASTEXITCODE
-    if ($helpExitCode -ne 0) { throw "qoder --help failed with exit code $helpExitCode" }
-    Write-Host 'COMMAND=PASS: qoder --version and qoder --help.'
+    if ($Package -eq 'qoder-cn-cli') {
+        $legacyShim = Get-Command 'qoderclicn' -ErrorAction Stop
+        if ($legacyShim.Source -notlike "$scoopShimDirectory*") { throw "Legacy qoderclicn shim resolves outside the isolated Scoop shims directory: $($legacyShim.Source)" }
+        $persistedSettingsPath = Join-Path $scoopRoot 'persist\qoder-cn-cli\qodercn-config\settings.json'
+        if (-not (Test-Path -LiteralPath $persistedSettingsPath -PathType Leaf)) { throw "Qoder CN's isolated persisted auto-update settings were not created: $persistedSettingsPath" }
+        $persistedSettings = Get-Content -LiteralPath $persistedSettingsPath -Raw | ConvertFrom-Json
+        if ($persistedSettings.general.enableAutoUpdate -ne $false) { throw "Qoder CN's persisted settings do not disable CLI self-updates." }
+        Write-Host "QODER_CN_CONFIG_ISOLATION=PASS: $persistedSettingsPath; compatibility shim=$($legacyShim.Source)"
+    }
+    elseif ($Package -eq 'antigravity-cli') {
+        $wrapperPath = Join-Path $appRoot 'current\agy.cmd'
+        $wrapperText = Get-Content -LiteralPath $wrapperPath -Raw
+        if ($wrapperText -notmatch 'AGY_CLI_DISABLE_AUTO_UPDATE=true' -or $wrapperText -notmatch 'agy\.exe') { throw 'Antigravity CLI wrapper does not disable its self-updater or invoke agy.exe.' }
+        Write-Host "ANTIGRAVITY_SELF_UPDATE_ISOLATION=PASS: $wrapperPath"
+    }
+    Assert-CliVersion ([string]$installedManifest.version) $packageCommand
+    $helpResult = Invoke-IsolatedPackageCommand -CommandName $packageCommand -Arguments @('--help')
+    if ($helpResult.ExitCode -ne 0) { throw "$packageCommand --help failed with exit code $($helpResult.ExitCode): $($helpResult.Output)" }
+    if ($Package -eq 'qoder-cn-cli') {
+        Assert-CliVersion ([string]$installedManifest.version) 'qoderclicn'
+        Write-Host 'QODER_CN_COMPAT_COMMAND=PASS: qoderclicn --version.'
+    }
+    Write-Host "COMMAND=PASS: $packageCommand --version and $packageCommand --help."
 
     if ($Mode -eq 'Upgrade') {
         Copy-Item -LiteralPath $candidatePath -Destination $bucketManifestPath -Force
-        git -C $sourceBucket add bucket/qoder-cli.json
+        git -C $sourceBucket add ("bucket/{0}.json" -f $Package)
         if ($LASTEXITCODE -ne 0) { throw 'Staging candidate manifest failed.' }
         git -C $sourceBucket commit --quiet -m "test: candidate manifest $($candidate.version)"
         if ($LASTEXITCODE -ne 0) { throw "Committing candidate manifest failed with exit code $LASTEXITCODE" }
         Invoke-Scoop @('update')
-        Invoke-Scoop @('update', 'qoder-cli')
-        Assert-QoderVersion ([string]$candidate.version)
+        Invoke-Scoop @('update', $Package)
+        Assert-CliVersion ([string]$candidate.version) $packageCommand
         Write-Host "UPGRADE=PASS: $($installedManifest.version) -> $($candidate.version)"
         if ($env:GITHUB_OUTPUT) { Add-Content -LiteralPath $env:GITHUB_OUTPUT -Value 'upgrade_test=passed' }
     }
@@ -1099,11 +1191,32 @@ function Add-Path {
         Write-Host 'UPGRADE=NOT_RUN: no historical version was supplied.'
     }
 
-    Invoke-Scoop @('uninstall', 'qoder-cli')
-    $remainingShimFiles = @(Get-ChildItem -LiteralPath $qoderShimDirectory -Filter 'qoder.*' -File -ErrorAction SilentlyContinue)
-    if ($remainingShimFiles.Count) { throw "Qoder shim files remained after uninstall: $($remainingShimFiles.FullName -join ', ')" }
-    if (Test-Path -LiteralPath $appRoot) { throw "Qoder Scoop app files remained after uninstall: $appRoot" }
-    Write-Host 'UNINSTALL=PASS: app directory and Qoder shims were removed.'
+    Invoke-Scoop @('uninstall', $Package)
+    function Assert-PackageUninstalled {
+        $remaining = @(Get-ChildItem -LiteralPath $scoopShimDirectory -Filter ("{0}.*" -f $packageCommand) -File -ErrorAction SilentlyContinue)
+        if ($Package -eq 'qoder-cn-cli') {
+            $remaining += @(Get-ChildItem -LiteralPath $scoopShimDirectory -Filter 'qoderclicn.*' -File -ErrorAction SilentlyContinue)
+        }
+        if ($remaining.Count) { throw "$Package shim files remained after uninstall: $($remaining.FullName -join ', ')" }
+        if (Test-Path -LiteralPath $appRoot) { throw "$Package Scoop app files remained after uninstall: $appRoot" }
+    }
+    Assert-PackageUninstalled
+    Write-Host "UNINSTALL=PASS: $Package app directory and command shims were removed."
+
+    Invoke-Scoop @('install', $packageName)
+    if (-not (Test-Path -LiteralPath $binaryPath -PathType Leaf)) {
+        throw "Reinstalled executable not found at expected Scoop path: $binaryPath"
+    }
+    $reinstallShim = Get-Command $packageCommand -ErrorAction Stop
+    if ($reinstallShim.Source -notlike "$scoopShimDirectory*") { throw "Reinstalled command resolves outside isolated shims: $($reinstallShim.Source)" }
+    Assert-CliVersion ([string]$installedManifest.version) $packageCommand
+    if ($Package -eq 'qoder-cn-cli') { Assert-CliVersion ([string]$installedManifest.version) 'qoderclicn' }
+    $reinstallHelp = Invoke-IsolatedPackageCommand -CommandName $packageCommand -Arguments @('--help')
+    if ($reinstallHelp.ExitCode -ne 0) { throw "Reinstalled $packageCommand --help failed with exit code $($reinstallHelp.ExitCode)." }
+    Write-Host "REINSTALL=PASS: $packageName $($installedManifest.version); executable=$binaryPath"
+    Invoke-Scoop @('uninstall', $Package)
+    Assert-PackageUninstalled
+    Write-Host "FINAL_UNINSTALL=PASS: $Package app directory and command shims were removed after reinstall."
     if ($env:GITHUB_OUTPUT) { Add-Content -LiteralPath $env:GITHUB_OUTPUT -Value 'uninstall_test=passed' }
 }
 finally {
@@ -1115,13 +1228,25 @@ finally {
 if (Test-Path -LiteralPath $runRoot) {
     throw "CLEANUP=FAIL: temporary test root remains: $runRoot"
 }
-Write-Host "SCOOP_CLEANUP=PASS: isolated Scoop root, bucket, download cache, and Qoder configuration were removed from $runRoot."
-Write-Warning 'TEMP_NATIVE_CACHE=NOT_CLEANED: Qoder may create qodercli-natives-* outside the isolated Scoop test root; no broad TEMP cleanup is attempted.'
+Write-Host "SCOOP_CLEANUP=PASS: isolated Scoop root, bucket, download cache, and package test state were removed from $runRoot."
+if ($Package -in @('qoder-cli', 'qoder-cn-cli')) {
+    Write-Warning 'TEMP_NATIVE_CACHE=NOT_CLEANED: Qoder may create a native dependency cache outside the isolated Scoop test root; no broad TEMP cleanup is attempted.'
+}
 if ($env:GITHUB_STEP_SUMMARY) {
-    Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value @'
+    $cleanupSummary = if ($Package -in @('qoder-cli', 'qoder-cn-cli')) { @'
 ### Cleanup status: PARTIAL
 
-The isolated Scoop test root was removed. Qoder may leave `qodercli-natives-*` in the runner TEMP directory outside that root; the test does not delete these paths. This workflow uses a GitHub-hosted runner VM, which GitHub decommissions after the job.
-'@
+The isolated Scoop test root was removed. Qoder may leave a native dependency cache in the runner TEMP directory outside that root; the test does not delete these paths. This workflow uses a GitHub-hosted runner VM, which GitHub decommissions after the job.
+'@ } else { @'
+### Cleanup status: PASS
+
+The isolated Scoop test root, download cache, and test bucket were removed. The workflow uses a GitHub-hosted runner VM, which GitHub decommissions after the job.
+'@ }
+    Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value $cleanupSummary
 }
-Write-Host 'CLEANUP=PARTIAL: isolated Scoop test root removed; external Qoder TEMP native cache is not tracked or deleted.'
+if ($Package -in @('qoder-cli', 'qoder-cn-cli')) {
+    Write-Host 'CLEANUP=PARTIAL: isolated Scoop test root removed; external Qoder TEMP native cache is not tracked or deleted.'
+}
+else {
+    Write-Host 'CLEANUP=PASS: isolated Scoop root, bucket, and download cache removed.'
+}

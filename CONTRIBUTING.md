@@ -1,6 +1,6 @@
 # 贡献与软件包维护
 
-Zev Scoop 当前只有 Qoder CLI 一个包。新增软件时，请先完成软件源调查和生命周期设计，再加入 `bucket/<package-name>.json`。不要从第三方 Bucket 复制来源并将其描述为官方来源，也不要仅凭一个可下载 URL 就推断软件可安全安装。
+Zev Scoop 当前已实现 Qoder CLI、Qoder CN CLI 和 Antigravity CLI；Antigravity IDE Standalone 尚无可安全维护的 Manifest。新增软件时，请先完成软件源调查和生命周期设计，再加入 `bucket/<package-name>.json`。不要从第三方 Bucket 复制来源并将其描述为官方来源，也不要仅凭一个可下载 URL 就推断软件可安全安装。
 
 ## 所有软件包都要调查
 
@@ -63,21 +63,23 @@ Manifest 文件名就是 Scoop 包名，使用简洁、稳定、可区分产品�
 
 ## 本地检查
 
-当前 Qoder CLI 维护器可运行：
+每个包都有独立的上游适配器；例如：
 
 ```powershell
 python scripts/update-qoder.py --check
-python scripts/update-qoder.py
-python scripts/validate-manifest.py --check-url
+python scripts/update-qoder-cn-cli.py --check
+python scripts/update-antigravity-cli.py --check
+python scripts/validate-manifest.py --all --check-url
 python -m unittest discover -s tests -v
 ```
 
-更新器当前只适用于 Qoder CLI。它从 Qoder 官方 channel 发现版本、验证主机与路径、下载并计算 SHA256、检查 ZIP 内容，最后原子更新 `bucket/qoder-cli.json`。不要将它描述为通用更新器。
+更新器按软件包分别实现，不是通用更新引擎。Qoder CN 适配器读取官方 channel 并校验 ZIP/SHA256；Antigravity CLI 适配器读取官方 GitHub Release 元数据并验证两个架构的资产。`--verify-current` 会下载并校验当前 Manifest 版本的官方工件。
 
 Windows 生命周期测试入口：
 
 ```powershell
-./scripts/test-scoop.ps1 -Mode Install
+./scripts/test-scoop.ps1 -Mode Install -Package qoder-cn-cli
+./scripts/test-scoop.ps1 -Mode Install -Package antigravity-cli
 ```
 
 该入口由 GitHub-hosted Windows runner 执行；不要在日常 Windows 环境运行，因为它会安装 Scoop 并操作临时测试目录。它安装当前检出版本、检查命令、版本、帮助和文件路径，再卸载并检查清理情况。真实升级测试单独使用不同的历史 Manifest：
@@ -86,10 +88,10 @@ Windows 生命周期测试入口：
 ./scripts/test-scoop.ps1 -Mode Upgrade -PreviousManifestPath <历史Manifest路径>
 ```
 
-缺少不同的历史版本时，升级测试明确标记为 skipped；同版本重装或更新不算升级测试。GitHub Actions 的 `Test Qoder CLI` 工作流在 PR/Push 上测试当前检出 Manifest，自动尝试取得历史版本；`Update Qoder CLI` 仅在新版本的实际升级测试通过后创建 PR。
+缺少不同的历史版本时，升级测试明确标记为 skipped；同版本重装或更新不算升级测试。GitHub Actions 的 `Test AI CLI packages` 在 Windows runner 上测试 Qoder CN CLI 和 Antigravity CLI；`Update AI CLI packages` 仅在上游资产、Manifest、全新安装和真实升级都通过后创建人工审核 PR。原有 `Test Qoder CLI` 和 `Update Qoder CLI` 工作流继续独立维护 Qoder CLI。
 
 ## Pull Request
 
 PR 应包含官方来源证据、架构与许可依据、Manifest 变更、哈希验证结果，以及真实执行过的本地/Windows 测试结果。未运行的测试必须标为未运行。不要自动合并更新 PR。
 
-仓库当前实现和目录状态见 [README](README.md)；Qoder CLI 的软件专属细节见 [包说明](docs/packages/qoder-cli.md) 与 [官方来源调查报告](docs/qoder-cli-source-audit.md)。
+仓库当前实现和目录状态见 [README](README.md)；每个已接入软件的来源及限制见 `docs/packages/` 下对应说明。Qoder CLI 的调查证据见 [官方来源调查报告](docs/qoder-cli-source-audit.md)。

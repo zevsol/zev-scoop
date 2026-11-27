@@ -1,0 +1,45 @@
+{
+    "$schema": "https://raw.githubusercontent.com/ScoopInstaller/Scoop/master/schema.json",
+    "version": "1.5.18",
+    "description": "Official Google Antigravity terminal agent client",
+    "homepage": "https://antigravity.google/product/antigravity-cli",
+    "license": "Proprietary",
+    "architecture": {
+        "64bit": {
+            "url": "https://github.com/google-antigravity/antigravity-cli/releases/download/1.5.18/agy_cli_windows_x64.zip",
+            "hash": "3f705965ba256add649a68be8834f73185034bdf206a457255b8a3d3c0497cac"
+        },
+        "arm64": {
+            "url": "https://github.com/google-antigravity/antigravity-cli/releases/download/1.5.18/agy_cli_windows_arm64.zip",
+            "hash": "565bd407954416c116be78f057696640bd15485f70e3d95e8ea0d21d6935b9f5"
+        }
+    },
+    "bin": [
+        ["agy.cmd", "agy"]
+    ],
+    "pre_install": [
+        "$wrapper = \"@echo off`r`nset `\"AGY_CLI_DISABLE_AUTO_UPDATE=true`\"`r`n`\"%~dp0agy.exe`\" %*`r`nexit /b %ERRORLEVEL%`r`n\"",
+        "[IO.File]::WriteAllText((Join-Path $dir 'agy.cmd'), $wrapper, [Text.Encoding]::ASCII)"
+    ],
+    "post_install": [
+        "if (-not (Test-Path -LiteralPath (Join-Path $dir 'agy.exe'))) { Rename-Item -LiteralPath (Join-Path $dir 'antigravity.exe') -NewName 'agy.exe' -ErrorAction Stop }"
+    ],
+    "checkver": {
+        "github": "https://github.com/google-antigravity/antigravity-cli"
+    },
+    "autoupdate": {
+        "architecture": {
+            "64bit": {
+                "url": "https://github.com/google-antigravity/antigravity-cli/releases/download/$version/agy_cli_windows_x64.zip"
+            },
+            "arm64": {
+                "url": "https://github.com/google-antigravity/antigravity-cli/releases/download/$version/agy_cli_windows_arm64.zip"
+            }
+        },
+        "hash": {
+            "mode": "json",
+            "url": "https://api.github.com/repos/google-antigravity/antigravity-cli/releases/tags/$version",
+            "jsonpath": "$.assets[?(@.name == '$basename')].digest"
+        }
+    }
+}

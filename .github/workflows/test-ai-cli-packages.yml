@@ -1,0 +1,108 @@
+name: Test AI CLI packages
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows-lifecycle:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - package: qoder-cn-cli
+            command: qodercn
+          - package: antigravity-cli
+            command: agy
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0
+      - name: Validate current checkout
+        shell: pwsh
+        run: |
+          python scripts/validate-manifest.py --manifest "bucket/${{ matrix.package }}.json" --check-url
+          if ($LASTEXITCODE -ne 0) { throw 'Package manifest validation failed.' }
+          python -m unittest discover -s tests -v
+          if ($LASTEXITCODE -ne 0) { throw 'Python unit tests failed.' }
+      - name: Find a distinct historical manifest for upgrade test
+        id: history
+        shell: pwsh
+        env:
+          PACKAGE: ${{ matrix.package }}
+        run: |
+          $manifestPath = "bucket/$env:PACKAGE.json"
+          $manifestObject = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
+          $current = [string]$manifestObject.version
+          if ([string]::IsNullOrWhiteSpace($current)) { throw 'The current manifest has no version.' }
+
+          $baselineCommit = $null
+          if ($env:GITHUB_EVENT_NAME -eq 'pull_request') {
+            $baseBranch = $env:GITHUB_BASE_REF
+            if ([string]::IsNullOrWhiteSpace($baseBranch)) { throw 'GITHUB_BASE_REF is empty for a pull_request event.' }
+            & git check-ref-format --branch $baseBranch | Out-Null
+            if ($LASTEXITCODE -ne 0) { throw "Invalid pull request base branch: $baseBranch" }
+            $baseRef = "refs/remotes/origin/$baseBranch"
+            $refMatches = @(& git for-each-ref --format='%(refname)' --count=1 $baseRef)
+            if ($LASTEXITCODE -ne 0) { throw "git for-each-ref failed for $baseRef." }
+            if (-not $refMatches -or $refMatches[0] -cne $baseRef) { throw "Fetched PR base ref is missing: $baseRef" }
+            $baselineCommit = (& git rev-parse --verify "$baseRef^{commit}") -join ''
+            if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($baselineCommit)) { throw "Cannot resolve $baseRef." }
+          }
+          else {
+            $headInfo = @(& git rev-list --parents -n 1 HEAD)
+            if ($LASTEXITCODE -ne 0 -or $headInfo.Count -ne 1) { throw 'Cannot inspect current commit parents.' }
+            $headParts = $headInfo[0] -split '\s+'
+            if ($headParts.Count -gt 1) {
+              $baselineCommit = (& git rev-parse --verify "$($headParts[1])^{commit}") -join ''
+              if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($baselineCommit)) { throw 'Cannot resolve the first parent of HEAD.' }
+            }
+          }
+
+          $reason = $null
+          $previous = $null
+          $previousJson = $null
+          if (-not $baselineCommit) { $reason = 'no-history' }
+          else {
+            $treeEntries = @(& git ls-tree -r --name-only $baselineCommit -- $manifestPath)
+            if ($LASTEXITCODE -ne 0) { throw "git ls-tree failed for $baselineCommit." }
+            if ($treeEntries -cnotcontains $manifestPath) { $reason = 'no-history' }
+            else {
+              $manifestObjectName = "$($baselineCommit):$manifestPath"
+              $previousJson = (& git show $manifestObjectName) -join "`n"
+              if ($LASTEXITCODE -ne 0) { throw "git show failed for $manifestObjectName." }
+              try { $previous = $previousJson | ConvertFrom-Json -ErrorAction Stop }
+              catch { throw "Historical manifest is invalid JSON: $($_.Exception.Message)" }
+              if ([string]::IsNullOrWhiteSpace([string]$previous.version)) { throw 'Historical manifest has no version.' }
+              if ([string]$previous.version -eq $current) { $reason = 'same-version' }
+            }
+          }
+          if ($reason) {
+            @('available=false', "reason=$reason", "previous_version=$(if ($previous) { [string]$previous.version } else { 'none' })", "current_version=$current") | Add-Content -LiteralPath $env:GITHUB_OUTPUT
+            Write-Host "HISTORY=SKIPPED: $reason; current=$current"
+          }
+          else {
+            $previousPath = Join-Path $env:RUNNER_TEMP "$env:PACKAGE-previous.json"
+            [IO.File]::WriteAllText($previousPath, $previousJson, [Text.UTF8Encoding]::new($false))
+            @('available=true', "previous_version=$([string]$previous.version)", "current_version=$current", "manifest_path=$previousPath") | Add-Content -LiteralPath $env:GITHUB_OUTPUT
+            Write-Host "HISTORY=AVAILABLE: $([string]$previous.version) -> $current"
+          }
+      - name: Test current package install, command, path, and uninstall
+        if: ${{ !cancelled() && (success() || steps.history.conclusion == 'failure') }}
+        shell: pwsh
+        run: ./scripts/test-scoop.ps1 -Mode Install -Package '${{ matrix.package }}'
+      - name: Test upgrade from historical official package
+        if: steps.history.outputs.available == 'true'
+        shell: pwsh
+        run: ./scripts/test-scoop.ps1 -Mode Upgrade -Package '${{ matrix.package }}' -PreviousManifestPath '${{ steps.history.outputs.manifest_path }}'
+      - name: Report upgrade test as skipped
+        if: steps.history.outputs.available != 'true'
+        shell: pwsh
+        run: |
+          $reason = '${{ steps.history.outputs.reason }}'
+          "Upgrade test: SKIPPED ($reason) — no distinct historical manifest is available." | Tee-Object -FilePath $env:GITHUB_STEP_SUMMARY -Append
