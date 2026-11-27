@@ -94,6 +94,8 @@ Windows 生命周期测试入口：
 
 ## Pull Request
 
-PR 应包含官方来源证据、架构与许可依据、Manifest 变更、哈希验证结果，以及真实执行过的本地/Windows 测试结果。未运行的测试必须标为未运行。不要自动合并更新 PR。
+- **所有变更必须走独立分支 + Pull Request**：从 `dev` 切出新分支（如 `feat/*`、`fix/*`、`docs/*`、`chore/*`）并向 `dev` 创建 PR，严禁直接向 `dev` 提交或推送。
+- PR 应包含官方来源证据、架构与许可依据、Manifest 变更、哈希验证结果，以及真实执行过的本地/Windows 测试结果。未运行的测试必须标为未运行。
+- 所有 PR 均须等待 GitHub Actions 检查通过后由人工审核合并，不要自动合并。AI 协作规范另见 [AGENTS.md](AGENTS.md)。
 
 仓库当前实现和目录状态见 [README](README.md)；每个已接入软件的来源及限制见 `docs/packages/` 下对应说明。Qoder CLI 的调查证据见 [官方来源调查报告](docs/qoder-cli-source-audit.md)。

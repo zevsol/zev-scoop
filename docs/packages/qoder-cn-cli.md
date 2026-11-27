@@ -6,7 +6,7 @@
 | Commands | `qodercn`; compatibility alias `qoderclicn` |
 | Platform | Windows x64 |
 | Current manifest version | `1.1.99` |
-| Status | Local isolated Windows install, command, uninstall, and reinstall PASS; hosted CI pending |
+| Status | Local isolated and GitHub-hosted Windows x64 install, command, uninstall, and reinstall PASS |
 
 ## Official source and install behavior
 
@@ -28,7 +28,7 @@ Scoop owns package version updates and uninstall. The official updater script's 
 - JSON/Manifest rule tests cover Qoder CN's official channel selection and URL/version checks.
 - A local isolated Scoop run installed version `1.1.99`; Scoop reported the manifest SHA256 check as `OK`. `qodercn --version`, `qodercn --help`, and the `qoderclicn --version` compatibility shim passed. The test verified the shim/EXE paths and persisted `general.enableAutoUpdate=false`, then uninstalled, reinstalled, reran commands, and uninstalled again.
 - The local run used a unique Scoop root, bucket, cache, and Qoder CN configuration under a temporary test root. Process and user/machine PATH snapshots matched afterward. The Scoop root was removed. Qoder may create a native dependency cache outside that root; the test did not use broad TEMP cleanup, so cleanup is reported as partial.
-- GitHub-hosted lifecycle CI has not run for this local change. A distinct historical-version upgrade was unavailable and was not simulated.
+- GitHub-hosted Windows x64 lifecycle CI passed in [Test AI CLI packages](https://github.com/zevsol/zev-scoop/actions/runs/46002829984) (install, SHA256, `qodercn`/`qoderclicn` commands, config isolation, uninstall, reinstall, final uninstall). A distinct historical-version upgrade was unavailable and was skipped rather than simulated.
 - A distinct historical-version upgrade test runs only when the workflow can locate a different previous manifest and download that version.
 
 Sources: [installation guide](https://docs.qoder.cn/cli/installation), [configuration and environment reference](https://docs.qoder.cn/cli/settings-reference), [official installer source](https://static.qoder.com.cn/qoder-cli-cn/install.ps1), [official channel manifest](https://static.qoder.com.cn/qoder-cli-cn/channels/manifest.json), [CLI changelog](https://changelog.qoder.cn/cli).
