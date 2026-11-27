@@ -411,6 +411,31 @@ function Invoke-IsolatedPackageCommand {
 
 function Assert-CliVersion([string]$ExpectedVersion, [string]$CommandName) {
     $result = Invoke-IsolatedPackageCommand -CommandName $CommandName -Arguments @('--version')
+    if ($Package -eq 'antigravity-ide') {
+        if ($result.ExitCode -ne 0 -or $result.Output -notmatch '\d+\.\d+\.\d+') {
+            throw "$CommandName --version did not report a valid core version (exit $($result.ExitCode)): $($result.Output)"
+        }
+        $currentDir = Join-Path $scoopRoot ("apps\{0}\current" -f $Package)
+        $productPath = Join-Path $currentDir 'resources\app\product.json'
+        if (-not (Test-Path -LiteralPath $productPath -PathType Leaf)) {
+            throw "Antigravity IDE product.json was not found: $productPath"
+        }
+        $productRaw = Get-Content -LiteralPath $productPath -Raw -ErrorAction Stop
+        $productJson = $productRaw | ConvertFrom-Json -ErrorAction Stop
+        $exePath = Join-Path $currentDir $packageExecutable
+        $versionInfo = (Get-Item -LiteralPath $exePath -ErrorAction Stop).VersionInfo
+        $escapedVersion = [regex]::Escape($ExpectedVersion)
+        $matched = ($productRaw -match $escapedVersion) -or
+            ([string]$versionInfo.ProductVersion -match $escapedVersion) -or
+            ([string]$versionInfo.FileVersion -match $escapedVersion)
+        if (-not $matched) {
+            $productVersionKeys = ($productJson.PSObject.Properties | Where-Object { $_.Name -match 'version' } | ForEach-Object { "$($_.Name)=$($_.Value)" }) -join '; '
+            throw "Antigravity IDE metadata did not report $ExpectedVersion (ProductVersion=$($versionInfo.ProductVersion), FileVersion=$($versionInfo.FileVersion), product.json=[$productVersionKeys])"
+        }
+        $coreOutput = ($result.Output -replace '\r?\n', ' ').Trim()
+        Write-Host "ANTIGRAVITY_IDE_VERSION=PASS: $ExpectedVersion (CLI core output: $coreOutput)"
+        return
+    }
     if ($result.ExitCode -ne 0 -or $result.Output -notmatch [regex]::Escape($ExpectedVersion)) {
         throw "$CommandName --version did not report ${ExpectedVersion} (exit $($result.ExitCode)): $($result.Output)"
     }

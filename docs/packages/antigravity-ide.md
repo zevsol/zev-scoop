@@ -35,7 +35,7 @@ Scoop uses `innounp` to unpack only the application directory without executing 
 
 ## Self-update and user data
 
-- Scoop owns installation, upgrades, Start Menu shortcuts (`Antigravity IDE`), and the `antigravity-ide` CLI shim (`bin\antigravity-ide.cmd`).
+- Scoop owns installation, upgrades, Start Menu shortcuts (`Antigravity IDE`), and the `antigravity-ide` CLI shim (`bin\antigravity-ide.cmd`). Note that `antigravity-ide --version` prints the underlying VS Code OSS core version (`1.107.0`), while the Windows lifecycle test verifies the Antigravity IDE release version via `resources\app\product.json` and PE `VersionInfo` metadata.
 - Automatic updates are enabled by default in Antigravity IDE settings; users should set `"update.mode": "none"` in IDE settings so Scoop manages updates without out-of-band modifications to the Scoop-managed directory.
 - User profile/data directories under `%APPDATA%` / `%USERPROFILE%` are preserved by Scoop across upgrades and uninstalls.
 
