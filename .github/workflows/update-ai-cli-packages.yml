@@ -9,12 +9,11 @@ permissions:
   contents: write
   pull-requests: write
 
-concurrency:
-  group: update-ai-cli-${{ matrix.package }}
-  cancel-in-progress: false
-
 jobs:
   update-test-pr:
+    concurrency:
+      group: update-ai-cli-${{ matrix.package }}
+      cancel-in-progress: false
     strategy:
       fail-fast: false
       matrix:
@@ -23,6 +22,8 @@ jobs:
             updater: update-qoder-cn-cli.py
           - package: antigravity-cli
             updater: update-antigravity-cli.py
+          - package: antigravity-ide
+            updater: update-antigravity-ide.py
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
@@ -33,15 +34,31 @@ jobs:
         shell: pwsh
         env:
           GITHUB_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ github.token }}
         run: |
-          $manifestPath = "bucket/${{ matrix.package }}.json"
+          $package = '${{ matrix.package }}'
+          $manifestPath = "bucket/$package.json"
           $before = [string](Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json).version
-          $previousPath = Join-Path $env:RUNNER_TEMP "${{ matrix.package }}-previous.json"
+          $previousPath = Join-Path $env:RUNNER_TEMP "$package-previous.json"
           Copy-Item -LiteralPath $manifestPath -Destination $previousPath
           python "scripts/${{ matrix.updater }}"
           if ($LASTEXITCODE -ne 0) { throw 'Official update adapter failed verification.' }
           $after = [string](Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json).version
-          "changed=$($before -ne $after)" >> $env:GITHUB_OUTPUT
+          $shouldProceed = ($before -ne $after)
+          if ($shouldProceed) {
+            $branch = "automation/$package-$after"
+            $remoteBranch = (& git ls-remote --heads origin "refs/heads/$branch") -join ''
+            if ($LASTEXITCODE -ne 0) { throw "git ls-remote failed while checking $branch." }
+            $openPrCount = (& gh pr list --head $branch --state open --json number --jq 'length') -join ''
+            if ($LASTEXITCODE -ne 0) { throw "gh pr list failed while checking $branch." }
+            if (-not [string]::IsNullOrWhiteSpace($remoteBranch) -or [int]$openPrCount -gt 0) {
+              Write-Host "SKIP: update branch or open PR already exists for $branch."
+              git checkout -- $manifestPath
+              if ($LASTEXITCODE -ne 0) { throw "Failed to revert $manifestPath after skipping duplicate PR." }
+              $shouldProceed = $false
+            }
+          }
+          "changed=$($shouldProceed.ToString().ToLowerInvariant())" >> $env:GITHUB_OUTPUT
           "old_version=$before" >> $env:GITHUB_OUTPUT
           "new_version=$after" >> $env:GITHUB_OUTPUT
           "previous_manifest=$previousPath" >> $env:GITHUB_OUTPUT
@@ -49,7 +66,7 @@ jobs:
         if: steps.update.outputs.changed == 'true'
         shell: pwsh
         run: |
-          python scripts/validate-manifest.py --all --check-url
+          python scripts/validate-manifest.py --manifest "bucket/${{ matrix.package }}.json" --check-url
           if ($LASTEXITCODE -ne 0) { throw 'Manifest validation failed.' }
           python -m unittest discover -s tests -v
           if ($LASTEXITCODE -ne 0) { throw 'Python unit tests failed.' }
@@ -93,4 +110,4 @@ jobs:
           "@
           $bodyPath = Join-Path $env:RUNNER_TEMP "$package-pr-body.md"
           Set-Content -LiteralPath $bodyPath -Value $body -Encoding utf8
-          gh pr create --title "chore($package): update $old to $new" --body-file $bodyPath
+          gh pr create --base $env:GITHUB_REF_NAME --title "chore($package): update $old to $new" --body-file $bodyPath

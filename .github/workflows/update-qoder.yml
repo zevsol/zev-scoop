@@ -23,13 +23,29 @@ jobs:
       - name: Check and fetch official release
         id: update
         shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           $before = (Get-Content bucket/qoder-cli.json -Raw | ConvertFrom-Json).version
           Copy-Item bucket/qoder-cli.json (Join-Path $env:RUNNER_TEMP 'qoder-previous.json')
           python scripts/update-qoder.py
           if ($LASTEXITCODE -ne 0) { throw "Qoder updater failed with exit code $LASTEXITCODE" }
           $after = (Get-Content bucket/qoder-cli.json -Raw | ConvertFrom-Json).version
-          "changed=$($before -ne $after)" >> $env:GITHUB_OUTPUT
+          $shouldProceed = ($before -ne $after)
+          if ($shouldProceed) {
+            $branch = "automation/qoder-$after"
+            $remoteBranch = (& git ls-remote --heads origin "refs/heads/$branch") -join ''
+            if ($LASTEXITCODE -ne 0) { throw "git ls-remote failed while checking $branch." }
+            $openPrCount = (& gh pr list --head $branch --state open --json number --jq 'length') -join ''
+            if ($LASTEXITCODE -ne 0) { throw "gh pr list failed while checking $branch." }
+            if (-not [string]::IsNullOrWhiteSpace($remoteBranch) -or [int]$openPrCount -gt 0) {
+              Write-Host "SKIP: update branch or open PR already exists for $branch."
+              git checkout -- bucket/qoder-cli.json
+              if ($LASTEXITCODE -ne 0) { throw 'Failed to revert bucket/qoder-cli.json after skipping duplicate PR.' }
+              $shouldProceed = $false
+            }
+          }
+          "changed=$($shouldProceed.ToString().ToLowerInvariant())" >> $env:GITHUB_OUTPUT
           "old_version=$before" >> $env:GITHUB_OUTPUT
           "new_version=$after" >> $env:GITHUB_OUTPUT
       - name: Validate candidate manifest
@@ -78,4 +94,4 @@ jobs:
           "@
           $bodyPath = Join-Path $env:RUNNER_TEMP 'qoder-pr-body.md'
           Set-Content -LiteralPath $bodyPath -Value $body -Encoding utf8
-          gh pr create --title "chore(qoder): update $old to $new" --body-file $bodyPath
+          gh pr create --base $env:GITHUB_REF_NAME --title "chore(qoder): update $old to $new" --body-file $bodyPath

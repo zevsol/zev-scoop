@@ -25,7 +25,7 @@ jobs:
             }
             Write-Host "Scoop schema PASS: $($manifestPath.Name)"
           }
-          python -m py_compile scripts/update-qoder.py scripts/update-qoder-cn-cli.py scripts/update-antigravity-cli.py scripts/validate-manifest.py
+          python -m py_compile scripts/update-qoder.py scripts/update-qoder-cn-cli.py scripts/update-antigravity-cli.py scripts/update-antigravity-ide.py scripts/validate-manifest.py
           if ($LASTEXITCODE -ne 0) { throw 'Python syntax check failed.' }
           python scripts/validate-manifest.py --all --check-url
           if ($LASTEXITCODE -ne 0) { throw 'Bucket manifest validation failed.' }

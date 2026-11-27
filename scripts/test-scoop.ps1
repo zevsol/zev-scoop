@@ -2,7 +2,7 @@ param(
     [ValidateSet('Install', 'Upgrade', 'TestExcludedPathsTransport', 'TestOwnedDirectoryCleanup', 'TestOwnedDirectoryCleanupRace')]
     [string]$Mode = 'Install',
     [string]$PreviousManifestPath,
-    [ValidateSet('qoder-cli', 'qoder-cn-cli', 'antigravity-cli')]
+    [ValidateSet('qoder-cli', 'qoder-cn-cli', 'antigravity-cli', 'antigravity-ide')]
     [string]$Package = 'qoder-cli'
 )
 
@@ -16,16 +16,19 @@ $packageCommand = switch ($Package) {
     'qoder-cli' { 'qoder' }
     'qoder-cn-cli' { 'qodercn' }
     'antigravity-cli' { 'agy' }
+    'antigravity-ide' { 'antigravity-ide' }
 }
 $packageExecutable = switch ($Package) {
     'qoder-cli' { 'qodercli.exe' }
     'qoder-cn-cli' { 'qoderclicn.exe' }
     'antigravity-cli' { 'agy.exe' }
+    'antigravity-ide' { 'Antigravity IDE.exe' }
 }
 $packageArchivePattern = switch ($Package) {
     'qoder-cli' { '*qodercli-windows-x64*.zip' }
     'qoder-cn-cli' { '*qoderclicn-windows-x64*.zip' }
     'antigravity-cli' { '*agy_cli_windows_x64*.zip' }
+    'antigravity-ide' { '*Antigravity*IDE*.exe' }
 }
 
 function Test-AbsoluteWindowsPath([string]$Path) {
@@ -195,6 +198,9 @@ $isolatedConfigHome = Join-Path $runRoot 'config-home'
 $isolatedQoderConfig = Join-Path $runRoot 'qoder-config'
 $isolatedQoderCnConfig = Join-Path $runRoot 'qoder-cn-config'
 $isolatedAntigravityUserProfile = Join-Path $runRoot 'antigravity-user-profile'
+$isolatedAntigravityIdeUserProfile = Join-Path $runRoot 'antigravity-ide-user-profile'
+$isolatedAntigravityIdeAppData = Join-Path $runRoot 'antigravity-ide-appdata'
+$isolatedAntigravityIdeLocalAppData = Join-Path $runRoot 'antigravity-ide-localappdata'
 $isolatedCliTemp = Join-Path $runRoot 'cli-temp'
 $globalRoot = Join-Path $runRoot 'global'
 $cacheRoot = Join-Path $runRoot 'cache'
@@ -345,7 +351,7 @@ function Read-ExcludedScoopPaths {
 }
 '@
 $previousEnvironment = @{}
-foreach ($name in @('SCOOP', 'SCOOP_GLOBAL', 'SCOOP_CACHE', 'SCOOP_REPO', 'XDG_CONFIG_HOME', 'QODER_CONFIG_DIR', 'QODERCN_CONFIG_DIR', 'AGY_CLI_DISABLE_AUTO_UPDATE', 'RUNNER_TEMP', 'USERPROFILE', 'TEMP', 'TMP', 'PATH')) {
+foreach ($name in @('SCOOP', 'SCOOP_GLOBAL', 'SCOOP_CACHE', 'SCOOP_REPO', 'XDG_CONFIG_HOME', 'QODER_CONFIG_DIR', 'QODERCN_CONFIG_DIR', 'AGY_CLI_DISABLE_AUTO_UPDATE', 'RUNNER_TEMP', 'USERPROFILE', 'APPDATA', 'LOCALAPPDATA', 'TEMP', 'TMP', 'PATH')) {
     $previousEnvironment[$name] = [Environment]::GetEnvironmentVariable($name, 'Process')
 }
 $previousUserPath = [Environment]::GetEnvironmentVariable('PATH', 'User')
@@ -377,6 +383,7 @@ function Invoke-IsolatedPackageCommand {
 
     $scopedNames = @('TEMP', 'TMP')
     if ($Package -eq 'antigravity-cli') { $scopedNames += 'USERPROFILE' }
+    elseif ($Package -eq 'antigravity-ide') { $scopedNames += @('USERPROFILE', 'APPDATA', 'LOCALAPPDATA') }
     $saved = @{}
     foreach ($name in $scopedNames) { $saved[$name] = [Environment]::GetEnvironmentVariable($name, 'Process') }
     try {
@@ -384,6 +391,11 @@ function Invoke-IsolatedPackageCommand {
         [Environment]::SetEnvironmentVariable('TMP', $isolatedCliTemp, 'Process')
         if ($Package -eq 'antigravity-cli') {
             [Environment]::SetEnvironmentVariable('USERPROFILE', $isolatedAntigravityUserProfile, 'Process')
+        }
+        elseif ($Package -eq 'antigravity-ide') {
+            [Environment]::SetEnvironmentVariable('USERPROFILE', $isolatedAntigravityIdeUserProfile, 'Process')
+            [Environment]::SetEnvironmentVariable('APPDATA', $isolatedAntigravityIdeAppData, 'Process')
+            [Environment]::SetEnvironmentVariable('LOCALAPPDATA', $isolatedAntigravityIdeLocalAppData, 'Process')
         }
         $output = @(& $CommandName @Arguments 2>&1)
         $exitCode = $LASTEXITCODE
@@ -974,6 +986,10 @@ try {
         New-Item -ItemType Directory -Path $isolatedAntigravityUserProfile -ErrorAction Stop | Out-Null
         Write-Host "ANTIGRAVITY_CONFIG_ISOLATION=PROCESS_USERPROFILE: $isolatedAntigravityUserProfile"
     }
+    elseif ($Package -eq 'antigravity-ide') {
+        New-Item -ItemType Directory -Path $isolatedAntigravityIdeUserProfile, $isolatedAntigravityIdeAppData, $isolatedAntigravityIdeLocalAppData -ErrorAction Stop | Out-Null
+        Write-Host "ANTIGRAVITY_IDE_CONFIG_ISOLATION=PROCESS_PROFILES: $isolatedAntigravityIdeUserProfile"
+    }
     if ($Package -eq 'qoder-cli') {
         $env:QODER_CONFIG_DIR = $isolatedQoderConfig
         New-Item -ItemType Directory -Path $isolatedQoderConfig -Force | Out-Null
@@ -1129,6 +1145,9 @@ function Add-Path {
     $packageName = "zevtest/$Package"
     $appRoot = Join-Path $scoopRoot ("apps\{0}" -f $Package)
     $binaryPath = Join-Path $appRoot ("current\{0}" -f $packageExecutable)
+    if ($Package -eq 'antigravity-ide') {
+        Invoke-Scoop @('install', 'innounp')
+    }
     Invoke-Scoop @('install', $packageName)
     if (-not (Test-Path -LiteralPath $binaryPath -PathType Leaf)) {
         throw "Installed executable not found at expected Scoop path: $binaryPath"
@@ -1142,7 +1161,7 @@ function Add-Path {
     # Scoop checks the manifest SHA256 before extraction and aborts installation on a mismatch.
     # The transcript preserves Scoop's explicit `Checking hash ... OK.` output for this run.
     Write-Host "SHA256=PASS: Scoop accepted archive against manifest SHA256 $expectedHash before extraction."
-    Write-Host "INSTALL=PASS: $packageName $($candidate.version); executable=$binaryPath"
+    Write-Host "INSTALL=PASS: $packageName $($installedManifest.version); executable=$binaryPath"
     if ($env:GITHUB_OUTPUT) { Add-Content -LiteralPath $env:GITHUB_OUTPUT -Value 'install_test=passed' }
 
     $scoopShimDirectory = Join-Path $scoopRoot 'shims'
@@ -1165,6 +1184,13 @@ function Add-Path {
         $wrapperText = Get-Content -LiteralPath $wrapperPath -Raw
         if ($wrapperText -notmatch 'AGY_CLI_DISABLE_AUTO_UPDATE=true' -or $wrapperText -notmatch 'agy\.exe') { throw 'Antigravity CLI wrapper does not disable its self-updater or invoke agy.exe.' }
         Write-Host "ANTIGRAVITY_SELF_UPDATE_ISOLATION=PASS: $wrapperPath"
+    }
+    elseif ($Package -eq 'antigravity-ide') {
+        $innoUpdaterPath = Join-Path $appRoot 'current\tools\inno_updater.exe'
+        if (Test-Path -LiteralPath $innoUpdaterPath) { throw "Unexpected Inno updater binary remains in unpacked Antigravity IDE directory: $innoUpdaterPath" }
+        $ideCliPath = Join-Path $appRoot 'current\bin\antigravity-ide.cmd'
+        if (-not (Test-Path -LiteralPath $ideCliPath -PathType Leaf)) { throw "Expected Antigravity IDE CLI wrapper was not unpacked: $ideCliPath" }
+        Write-Host "ANTIGRAVITY_IDE_LAYOUT=PASS: $ideCliPath"
     }
     Assert-CliVersion ([string]$installedManifest.version) $packageCommand
     $helpResult = Invoke-IsolatedPackageCommand -CommandName $packageCommand -Arguments @('--help')
@@ -1209,11 +1235,12 @@ function Add-Path {
     }
     $reinstallShim = Get-Command $packageCommand -ErrorAction Stop
     if ($reinstallShim.Source -notlike "$scoopShimDirectory*") { throw "Reinstalled command resolves outside isolated shims: $($reinstallShim.Source)" }
-    Assert-CliVersion ([string]$installedManifest.version) $packageCommand
-    if ($Package -eq 'qoder-cn-cli') { Assert-CliVersion ([string]$installedManifest.version) 'qoderclicn' }
+    $reinstalledVersion = if ($Mode -eq 'Upgrade') { [string]$candidate.version } else { [string]$installedManifest.version }
+    Assert-CliVersion $reinstalledVersion $packageCommand
+    if ($Package -eq 'qoder-cn-cli') { Assert-CliVersion $reinstalledVersion 'qoderclicn' }
     $reinstallHelp = Invoke-IsolatedPackageCommand -CommandName $packageCommand -Arguments @('--help')
     if ($reinstallHelp.ExitCode -ne 0) { throw "Reinstalled $packageCommand --help failed with exit code $($reinstallHelp.ExitCode)." }
-    Write-Host "REINSTALL=PASS: $packageName $($installedManifest.version); executable=$binaryPath"
+    Write-Host "REINSTALL=PASS: $packageName $reinstalledVersion; executable=$binaryPath"
     Invoke-Scoop @('uninstall', $Package)
     Assert-PackageUninstalled
     Write-Host "FINAL_UNINSTALL=PASS: $Package app directory and command shims were removed after reinstall."

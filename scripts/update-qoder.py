@@ -94,6 +94,22 @@ def read_manifest() -> dict[str, Any]:
     return value
 
 
+def validate_archive(path: Path) -> list[str]:
+    try:
+        with zipfile.ZipFile(path) as package:
+            names = [entry.filename for entry in package.infolist() if not entry.is_dir()]
+    except (zipfile.BadZipFile, OSError) as exc:
+        raise UpdateError(f"Official artifact is not a valid ZIP: {exc}") from exc
+    normalized = [name.replace("\\", "/") for name in names]
+    if any(name.startswith("/") or re.match(r"^[A-Za-z]:", name) or ".." in name.split("/") for name in normalized):
+        raise UpdateError(f"Unsafe path in official archive: {names!r}")
+    required = {"qodercli.exe"}
+    allowed = required | {"THIRD-PARTY-LICENSES"}
+    if not required.issubset(normalized) or not set(normalized).issubset(allowed):
+        raise UpdateError(f"Unexpected archive contents: {names!r}; expected qodercli.exe")
+    return normalized
+
+
 def download_and_verify(url: str, expected_hash: str) -> None:
     request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
     digest = hashlib.sha256()
@@ -121,13 +137,7 @@ def download_and_verify(url: str, expected_hash: str) -> None:
         actual_hash = digest.hexdigest()
         if actual_hash != expected_hash:
             raise UpdateError(f"SHA256 mismatch: expected {expected_hash}, got {actual_hash}")
-        try:
-            with zipfile.ZipFile(archive_path) as package:
-                names = [entry.filename for entry in package.infolist() if not entry.is_dir()]
-        except (zipfile.BadZipFile, OSError) as exc:
-            raise UpdateError(f"Official artifact is not a valid ZIP: {exc}") from exc
-        if names != ["qodercli.exe"]:
-            raise UpdateError(f"Unexpected archive contents: {names!r}; expected only qodercli.exe")
+        validate_archive(archive_path)
 
 
 def atomic_write(value: dict[str, Any]) -> None:

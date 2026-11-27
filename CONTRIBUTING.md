@@ -1,6 +1,6 @@
 # 贡献与软件包维护
 
-Zev Scoop 当前已实现 Qoder CLI、Qoder CN CLI 和 Antigravity CLI；Antigravity IDE Standalone 尚无可安全维护的 Manifest。新增软件时，请先完成软件源调查和生命周期设计，再加入 `bucket/<package-name>.json`。不要从第三方 Bucket 复制来源并将其描述为官方来源，也不要仅凭一个可下载 URL 就推断软件可安全安装。
+Zev Scoop 当前已实现 Qoder CLI、Qoder CN CLI、Antigravity CLI 和 Antigravity IDE。新增软件时，请先完成软件源调查和生命周期设计，再加入 `bucket/<package-name>.json`。不要从第三方 Bucket 复制来源并将其描述为官方来源，也不要仅凭一个可下载 URL 就推断软件可安全安装。
 
 ## 所有软件包都要调查
 
@@ -69,17 +69,19 @@ Manifest 文件名就是 Scoop 包名，使用简洁、稳定、可区分产品�
 python scripts/update-qoder.py --check
 python scripts/update-qoder-cn-cli.py --check
 python scripts/update-antigravity-cli.py --check
+python scripts/update-antigravity-ide.py --check
 python scripts/validate-manifest.py --all --check-url
 python -m unittest discover -s tests -v
 ```
 
-更新器按软件包分别实现，不是通用更新引擎。Qoder CN 适配器读取官方 channel 并校验 ZIP/SHA256；Antigravity CLI 适配器读取官方 GitHub Release 元数据并验证两个架构的资产。`--verify-current` 会下载并校验当前 Manifest 版本的官方工件。
+更新器按软件包分别实现，不是通用更新引擎。Qoder CN 适配器读取官方 channel 并校验 ZIP/SHA256；Antigravity CLI 适配器读取官方 GitHub Release 元数据并验证两个架构的资产；Antigravity IDE 适配器从官方下载页解析版本与构建号并验证两个架构安装包的 Google Authenticode 签名与 SHA256。`--verify-current` 会下载并校验当前 Manifest 版本的官方工件。
 
 Windows 生命周期测试入口：
 
 ```powershell
 ./scripts/test-scoop.ps1 -Mode Install -Package qoder-cn-cli
 ./scripts/test-scoop.ps1 -Mode Install -Package antigravity-cli
+./scripts/test-scoop.ps1 -Mode Install -Package antigravity-ide
 ```
 
 该入口由 GitHub-hosted Windows runner 执行；不要在日常 Windows 环境运行，因为它会安装 Scoop 并操作临时测试目录。它安装当前检出版本、检查命令、版本、帮助和文件路径，再卸载并检查清理情况。真实升级测试单独使用不同的历史 Manifest：

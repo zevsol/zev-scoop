@@ -18,7 +18,7 @@
         ["agy.cmd", "agy"]
     ],
     "pre_install": [
-        "$wrapper = \"@echo off`r`nset `\"AGY_CLI_DISABLE_AUTO_UPDATE=true`\"`r`n`\"%~dp0agy.exe`\" %*`r`nexit /b %ERRORLEVEL%`r`n\"",
+        "$wrapper = \"@echo off`r`nsetlocal`r`nset `\"AGY_CLI_DISABLE_AUTO_UPDATE=true`\"`r`n`\"%~dp0agy.exe`\" %*`r`nexit /b %ERRORLEVEL%`r`n\"",
         "[IO.File]::WriteAllText((Join-Path $dir 'agy.cmd'), $wrapper, [Text.Encoding]::ASCII)"
     ],
     "post_install": [

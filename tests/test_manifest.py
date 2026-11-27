@@ -19,6 +19,9 @@ CN_SPEC.loader.exec_module(cn_updater)
 AGY_SPEC = importlib.util.spec_from_file_location("update_antigravity", ROOT / "scripts" / "update-antigravity-cli.py")
 agy_updater = importlib.util.module_from_spec(AGY_SPEC)
 AGY_SPEC.loader.exec_module(agy_updater)
+IDE_SPEC = importlib.util.spec_from_file_location("update_antigravity_ide", ROOT / "scripts" / "update-antigravity-ide.py")
+ide_updater = importlib.util.module_from_spec(IDE_SPEC)
+IDE_SPEC.loader.exec_module(ide_updater)
 
 
 class ManifestTests(unittest.TestCase):
@@ -132,6 +135,56 @@ class UpdaterTests(unittest.TestCase):
         assets = agy_updater.select_assets(release)
         self.assertEqual("c" * 64, assets["64bit"]["hash"])
         self.assertEqual("d" * 64, assets["arm64"]["hash"])
+
+    def test_qoder_archive_allows_licenses_and_rejects_unsafe_paths(self):
+        with tempfile.TemporaryDirectory() as directory:
+            archive_path = Path(directory) / "qoder.zip"
+            with zipfile.ZipFile(archive_path, "w") as archive:
+                archive.writestr("qodercli.exe", b"binary")
+            self.assertEqual(["qodercli.exe"], updater.validate_archive(archive_path))
+            with zipfile.ZipFile(archive_path, "w") as archive:
+                archive.writestr("qodercli.exe", b"binary")
+                archive.writestr("THIRD-PARTY-LICENSES", b"licenses")
+            self.assertEqual({"qodercli.exe", "THIRD-PARTY-LICENSES"}, set(updater.validate_archive(archive_path)))
+            with zipfile.ZipFile(archive_path, "w") as archive:
+                archive.writestr("../escape.txt", b"unsafe")
+                archive.writestr("qodercli.exe", b"binary")
+            with self.assertRaises(updater.UpdateError):
+                updater.validate_archive(archive_path)
+            with zipfile.ZipFile(archive_path, "w") as archive:
+                archive.writestr("qodercli.exe", b"binary")
+                archive.writestr("unexpected.dll", b"extra")
+            with self.assertRaises(updater.UpdateError):
+                updater.validate_archive(archive_path)
+
+    def test_antigravity_ide_parses_matching_official_urls(self):
+        html = (
+            '<a href="https://edgedl.me.gvt1.com/edgedl/release2/j0qc3/antigravity/stable/2.9.1-123456/windows-x64/Antigravity%20IDE.exe">x64</a>'
+            '<a href="https://edgedl.me.gvt1.com/edgedl/release2/j0qc3/antigravity/stable/2.9.1-123456/windows-arm64/Antigravity%20IDE.exe">arm64</a>'
+        )
+        parsed = ide_updater.parse_download_page(html)
+        self.assertEqual("2.9.1", parsed["version"])
+        self.assertEqual("123456", parsed["build"])
+        self.assertIn("windows-x64", parsed["architecture"]["64bit"])
+        self.assertIn("windows-arm64", parsed["architecture"]["arm64"])
+
+    def test_antigravity_ide_rejects_mismatched_builds_or_missing_arch(self):
+        mismatched = (
+            'https://edgedl.me.gvt1.com/edgedl/release2/j0qc3/antigravity/stable/2.9.1-111/windows-x64/Antigravity%20IDE.exe '
+            'https://edgedl.me.gvt1.com/edgedl/release2/j0qc3/antigravity/stable/2.9.1-222/windows-arm64/Antigravity%20IDE.exe'
+        )
+        with self.assertRaises(ide_updater.UpdateError):
+            ide_updater.parse_download_page(mismatched)
+        missing_arm64 = (
+            'https://edgedl.me.gvt1.com/edgedl/release2/j0qc3/antigravity/stable/2.9.1-111/windows-x64/Antigravity%20IDE.exe'
+        )
+        with self.assertRaises(ide_updater.UpdateError):
+            ide_updater.parse_download_page(missing_arm64)
+
+    def test_cmd_wrappers_use_setlocal(self):
+        for pkg in ("antigravity-cli.json", "qoder-cn-cli.json"):
+            data = json.loads((ROOT / "bucket" / pkg).read_text(encoding="utf-8"))
+            self.assertIn("setlocal", "\n".join(data["pre_install"]))
 
 
 if __name__ == "__main__":

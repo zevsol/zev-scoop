@@ -18,6 +18,7 @@ PACKAGE_RULES = {
     "qoder-cli": {"host": "qoder-ide.oss-accelerate.aliyuncs.com", "arches": ("64bit",)},
     "qoder-cn-cli": {"host": "static.qoder.com.cn", "arches": ("64bit",)},
     "antigravity-cli": {"host": "github.com", "arches": ("64bit", "arm64")},
+    "antigravity-ide": {"host": "edgedl.me.gvt1.com", "arches": ("64bit", "arm64")},
 }
 
 
@@ -71,8 +72,8 @@ def _validate_package(data: dict, package: str) -> list[str]:
             errors.append("Qoder CN config must use its separate persisted directory")
         pre_install = "\n".join(data.get("pre_install", [])) if isinstance(data.get("pre_install"), list) else ""
         post_install = "\n".join(data.get("post_install", [])) if isinstance(data.get("post_install"), list) else ""
-        if "QODERCN_CONFIG_DIR" not in pre_install or "qodercn.cmd" not in pre_install:
-            errors.append("pre_install must create the Qoder CN wrapper before Scoop creates command shims")
+        if "QODERCN_CONFIG_DIR" not in pre_install or "qodercn.cmd" not in pre_install or "setlocal" not in pre_install:
+            errors.append("pre_install must create the setlocal-scoped Qoder CN wrapper before Scoop creates command shims")
         for expected_text in ("enableAutoUpdate", "false"):
             if expected_text not in post_install:
                 errors.append(f"post_install must disable Qoder CN automatic updates: {expected_text}")
@@ -95,8 +96,8 @@ def _validate_package(data: dict, package: str) -> list[str]:
             errors.append("bin must expose agy through the per-process update-control wrapper")
         pre_install = "\n".join(data.get("pre_install", [])) if isinstance(data.get("pre_install"), list) else ""
         post_install = "\n".join(data.get("post_install", [])) if isinstance(data.get("post_install"), list) else ""
-        if "AGY_CLI_DISABLE_AUTO_UPDATE=true" not in pre_install or "agy.cmd" not in pre_install:
-            errors.append("pre_install must create the update-isolating agy wrapper before Scoop creates its shim")
+        if "AGY_CLI_DISABLE_AUTO_UPDATE=true" not in pre_install or "agy.cmd" not in pre_install or "setlocal" not in pre_install:
+            errors.append("pre_install must create the setlocal-scoped update-isolating agy wrapper before Scoop creates its shim")
         if "antigravity.exe" not in post_install or "agy.exe" not in post_install:
             errors.append("post_install must rename the official executable to the wrapper's expected agy.exe")
         if data.get("checkver", {}).get("github") != "https://github.com/google-antigravity/antigravity-cli":
@@ -109,6 +110,38 @@ def _validate_package(data: dict, package: str) -> list[str]:
         auto_hash = autoupdate.get("hash", {})
         if auto_hash.get("mode") != "json" or auto_hash.get("url") != "https://api.github.com/repos/google-antigravity/antigravity-cli/releases/tags/$version":
             errors.append("autoupdate hash must come from the matching official GitHub release metadata")
+    elif package == "antigravity-ide":
+        if data.get("innosetup") is not True:
+            errors.append("antigravity-ide must use Scoop innosetup unpacking")
+        if data.get("extract_dir") != "{code_GetDestDir}":
+            errors.append("antigravity-ide must extract from {code_GetDestDir}")
+        builds: set[str] = set()
+        for arch, suffix in (("64bit", "x64"), ("arm64", "arm64")):
+            item = architecture.get(arch, {})
+            parsed = urlsplit(item.get("url", ""))
+            pattern = rf"^/edgedl/release2/j0qc3/antigravity/stable/{re.escape(version)}-(\d+)/windows-{suffix}/Antigravity%20IDE\.exe$"
+            match = re.fullmatch(pattern, parsed.path)
+            if not match:
+                errors.append(f"architecture.{arch}.url must match official Antigravity IDE {suffix} URL")
+            else:
+                builds.add(match.group(1))
+        if len(builds) > 1:
+            errors.append("architecture.64bit and architecture.arm64 must share the same build identifier")
+        if data.get("bin") != [["bin\\antigravity-ide.cmd", "antigravity-ide"]]:
+            errors.append("bin must expose bin\\antigravity-ide.cmd as antigravity-ide")
+        if data.get("shortcuts") != [["Antigravity IDE.exe", "Antigravity IDE"]]:
+            errors.append("shortcuts must expose Antigravity IDE.exe as Antigravity IDE")
+        checkver = data.get("checkver", {})
+        if checkver.get("url") != "https://antigravity.google/download":
+            errors.append("checkver must use the official Antigravity download page")
+        regex = checkver.get("regex", "")
+        if "(?<version>" not in regex or "(?<build>" not in regex:
+            errors.append("checkver regex must capture version and build")
+        autoupdate = data.get("autoupdate", {})
+        for arch, suffix in (("64bit", "x64"), ("arm64", "arm64")):
+            expected = f"https://edgedl.me.gvt1.com/edgedl/release2/j0qc3/antigravity/stable/$version-$matchBuild/windows-{suffix}/Antigravity%20IDE.exe"
+            if autoupdate.get("architecture", {}).get(arch, {}).get("url") != expected:
+                errors.append(f"autoupdate architecture.{arch} must use the versioned official Antigravity IDE URL")
     return errors
 
 
