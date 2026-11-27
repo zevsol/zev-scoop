@@ -7,7 +7,7 @@
 | Shortcut | `Antigravity IDE` (`Antigravity IDE.exe`) |
 | Platform | Windows x64 and ARM64 |
 | Current manifest version | `2.8.0` |
-| Status | Manifest implemented with `innosetup: true` (`extract_dir: "{code_GetDestDir}"`); local schema/unit/URL checks PASS; GitHub-hosted Windows lifecycle CI pending |
+| Status | Manifest implemented with `innosetup: true` (`extract_dir: "{code_GetDestDir}"`); local checks and GitHub-hosted Windows x64 lifecycle CI PASS; ARM64 runtime untested |
 
 ## Official release evidence
 
@@ -43,4 +43,4 @@ Scoop uses `innounp` to unpack only the application directory without executing 
 
 - Local Scoop JSON schema check, manifest rule checks (`validate-manifest.py`), unit tests, and HTTPS HEAD URL checks pass.
 - Both installers' SHA256 hashes and Google LLC Authenticode signatures were verified locally against the official `2.8.0` installers; `install_script.iss` confirmed `{code_GetDestDir}` layout.
-- GitHub-hosted Windows lifecycle testing (using `innounp` extraction in an isolated Scoop environment) is configured in `.github/workflows/test-ai-cli-packages.yml` and awaits its first runner execution.
+- GitHub-hosted Windows x64 lifecycle CI passed in [Test AI CLI packages](https://github.com/zevsol/zev-scoop/actions/runs/46002829984) (`innounp` extraction via `{code_GetDestDir}`, absence of `tools\inno_updater.exe`, `antigravity-ide.cmd` shim, core `--version` + metadata release version check, `--help`, uninstall, reinstall, and cleanup). Upgrade testing was skipped because no distinct historical manifest was available; ARM64 runtime execution has not been tested.

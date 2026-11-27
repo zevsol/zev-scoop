@@ -34,12 +34,10 @@ jobs:
           $shouldProceed = ($before -ne $after)
           if ($shouldProceed) {
             $branch = "automation/qoder-$after"
-            $remoteBranch = (& git ls-remote --heads origin "refs/heads/$branch") -join ''
-            if ($LASTEXITCODE -ne 0) { throw "git ls-remote failed while checking $branch." }
             $openPrCount = (& gh pr list --head $branch --state open --json number --jq 'length') -join ''
             if ($LASTEXITCODE -ne 0) { throw "gh pr list failed while checking $branch." }
-            if (-not [string]::IsNullOrWhiteSpace($remoteBranch) -or [int]$openPrCount -gt 0) {
-              Write-Host "SKIP: update branch or open PR already exists for $branch."
+            if ([int]$openPrCount -gt 0) {
+              Write-Host "SKIP: an open PR already exists for $branch."
               git checkout -- bucket/qoder-cli.json
               if ($LASTEXITCODE -ne 0) { throw 'Failed to revert bucket/qoder-cli.json after skipping duplicate PR.' }
               $shouldProceed = $false
@@ -78,7 +76,14 @@ jobs:
           git switch -c $branch
           git add bucket/qoder-cli.json
           git commit -m "chore(qoder): update $old to $new"
-          git push --set-upstream origin $branch
+          git push --force-with-lease --set-upstream origin $branch
+          if ($LASTEXITCODE -ne 0) { throw "Failed to push $branch." }
+          $openPrCount = (& gh pr list --head $branch --state open --json number --jq 'length') -join ''
+          if ($LASTEXITCODE -ne 0) { throw "gh pr list failed before creating PR for $branch." }
+          if ([int]$openPrCount -gt 0) {
+            Write-Host "SKIP: an open PR already exists for $branch."
+            exit 0
+          }
           $manifest = Get-Content bucket/qoder-cli.json -Raw | ConvertFrom-Json
           $sha = $manifest.architecture.'64bit'.hash
           $url = $manifest.architecture.'64bit'.url

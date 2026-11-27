@@ -15,9 +15,9 @@ Scoop 将应用安装到用户目录并通过 shim 管理命令，便于不依�
 | Package | Category | Platform | Status |
 |---|---|---|---|
 | [Qoder CLI](docs/packages/qoder-cli.md) (`qoder-cli`) | AI / CLI | Windows x64 | Implemented；GitHub-hosted Windows 生命周期测试通过 |
-| [Qoder CN CLI](docs/packages/qoder-cn-cli.md) (`qoder-cn-cli`) | AI / CLI | Windows x64 | 本地安装、命令、卸载和重装 PASS；GitHub Runner 验收待运行 |
-| [Antigravity CLI](docs/packages/antigravity-cli.md) (`antigravity-cli`) | AI / CLI | Windows x64 / ARM64 | 本地 x64 安装、命令、卸载和重装 PASS；ARM64 与 GitHub Runner 验收待验证 |
-| [Antigravity IDE (Standalone)](docs/packages/antigravity-ide.md) (`antigravity-ide`) | AI / Desktop | Windows x64 / ARM64 | 已接入（`innosetup: true` 解包）；Schema、URL、本地单测及官方安装包签名/哈希核实 PASS；GitHub Runner 验收待运行 |
+| [Qoder CN CLI](docs/packages/qoder-cn-cli.md) (`qoder-cn-cli`) | AI / CLI | Windows x64 | Implemented；本地与 GitHub-hosted Windows x64 生命周期测试通过 |
+| [Antigravity CLI](docs/packages/antigravity-cli.md) (`antigravity-cli`) | AI / CLI | Windows x64 / ARM64 | Implemented；本地与 GitHub-hosted Windows x64 生命周期测试通过；ARM64 仅核实元数据/URL |
+| [Antigravity IDE (Standalone)](docs/packages/antigravity-ide.md) (`antigravity-ide`) | AI / Desktop | Windows x64 / ARM64 | Implemented（`innosetup: true` 解包）；GitHub-hosted Windows x64 生命周期测试通过；ARM64 仅核实元数据/签名 |
 | Qoder IDE (`qoder-ide`) | AI / Desktop | Windows | Planned，尚未调查 |
 | Codex CLI (`codex-cli`) | AI / CLI | Windows | Planned，尚未调查 |
 | Gemini CLI (`gemini-cli`) | AI / CLI | Windows | Planned，尚未调查 |
@@ -90,7 +90,7 @@ Manual Review & Merge
 
 **当前适用范围：**版本发现和 Manifest 更新代码按软件包分别实现；这些适配器不是可供任意软件直接使用的通用更新引擎。桌面应用的安装/卸载方式须逐包核实；Antigravity IDE Standalone 使用 Scoop 的 `innosetup` + `extract_dir` 解包策略绕过安装器副作用。
 
-**验证状态：**Qoder CLI 已有本地及 GitHub-hosted Windows 生命周期验证。Qoder CN CLI 已在本地隔离 Scoop 环境完成安装、版本/帮助命令、配置隔离、卸载和重装；Antigravity CLI 已在本地隔离环境完成 x64 安装、版本/帮助命令、配置隔离、卸载和重装；Antigravity IDE 已完成官方安装包签名/哈希核实、Schema 与规则校验及单元测试。三者的 GitHub-hosted Windows CI 尚未运行。各包的证据和限制见对应包文档。
+**验证状态：**`qoder-cli`（Run `46002830105`）、`qoder-cn-cli`、`antigravity-cli` 和 `antigravity-ide`（Run `46002829984`）均已通过 GitHub-hosted Windows x64 生命周期 CI；ARM64 架构目前仅完成官方元数据、URL 与校验和/签名核实，尚未在 ARM64 Runner 实机运行；真实升级测试在版本变更时触发。各包的证据和限制见对应包文档。
 
 ## 仓库结构
 
@@ -101,8 +101,9 @@ tests/                   Python 本地测试
 docs/packages/           单个软件包的使用与实现说明
 docs/                    来源调查和维护设计文档
 .github/workflows/       校验、版本更新和 Windows 测试工作流
+AGENTS.md                AI 代理协作与分支/PR 硬性规范
 ```
 
 ## 参与维护
 
-新增软件时，先核实官方分发渠道、架构、版本接口、哈希/签名、许可及完整安装卸载行为，再添加 Manifest 和适配测试。按类别的调查清单及本地命令见 [CONTRIBUTING.md](CONTRIBUTING.md)。
+所有手动修改与自动更新均应基于独立分支向默认分支 `dev` 提交 Pull Request，待 CI 校验通过后再人工审核合并，禁止直接向 `dev` 推送。新增软件时，先核实官方分发渠道、架构、版本接口、哈希/签名、许可及完整安装卸载行为，再添加 Manifest 和适配测试。按类别的调查清单、分支/PR 规范及本地命令见 [CONTRIBUTING.md](CONTRIBUTING.md) 与 [AGENTS.md](AGENTS.md)。

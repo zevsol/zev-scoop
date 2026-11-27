@@ -6,7 +6,7 @@
 | Command | `agy` |
 | Platform | Windows x64 and ARM64 |
 | Current manifest version | `1.5.18` |
-| Status | Local isolated Windows x64 install, command, uninstall, and reinstall PASS; ARM64/hosted CI pending |
+| Status | Local isolated and GitHub-hosted Windows x64 install, command, uninstall, and reinstall PASS; ARM64 runtime untested |
 
 ## Official source and package layout
 
@@ -28,7 +28,7 @@ Antigravity CLI documents the `AGY_CLI_DISABLE_AUTO_UPDATE=true` environment var
 - The current x64 ZIP was downloaded locally: its SHA256 was `3f705965ba256add649a68be8834f73185034bdf206a457255b8a3d3c0497cac`, matching the official GitHub release metadata, and its archive contains `antigravity.exe`. The ARM64 SHA256 is read and checked against the official release metadata by the updater; the ARM64 archive itself was not downloaded in this local run.
 - A local isolated Scoop run on x64 installed version `1.5.18`; Scoop reported the manifest SHA256 check as `OK`. `agy --version`, `agy --help`, the shim and executable paths passed. The CLI command ran with `AGY_CLI_DISABLE_AUTO_UPDATE=true` from its wrapper, an isolated process `USERPROFILE`, and temporary `TEMP/TMP`; no sign-in or Agent task was started. The package was uninstalled, reinstalled and tested again, then uninstalled.
 - Process and user/machine PATH snapshots matched afterward, and the isolated Scoop root, cache, and test bucket were removed. The Windows Credential Manager is per-user and is not namespaced by `USERPROFILE`; the tested version/help commands did not perform login or access credentials.
-- ARM64 is declared by the official release and manifest, but no ARM64 runner was used locally. GitHub-hosted lifecycle CI has not run for this local change.
+- ARM64 is declared by the official release and manifest, and its official GitHub release SHA256 is verified by the updater, but no ARM64 runner was used locally or in CI. GitHub-hosted Windows x64 lifecycle CI passed in [Test AI CLI packages](https://github.com/zevsol/zev-scoop/actions/runs/46002829984).
 - No distinct historical package manifest exists at the current Git baseline, so upgrade was skipped rather than simulated.
 
 Sources: [official download page](https://antigravity.google/download), [CLI installation guide](https://antigravity.google/docs/cli/getting-started), [CLI troubleshooting](https://antigravity.google/docs/cli/troubleshooting), [official CLI releases](https://github.com/google-antigravity/antigravity-cli/releases).

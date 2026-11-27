@@ -47,12 +47,10 @@ jobs:
           $shouldProceed = ($before -ne $after)
           if ($shouldProceed) {
             $branch = "automation/$package-$after"
-            $remoteBranch = (& git ls-remote --heads origin "refs/heads/$branch") -join ''
-            if ($LASTEXITCODE -ne 0) { throw "git ls-remote failed while checking $branch." }
             $openPrCount = (& gh pr list --head $branch --state open --json number --jq 'length') -join ''
             if ($LASTEXITCODE -ne 0) { throw "gh pr list failed while checking $branch." }
-            if (-not [string]::IsNullOrWhiteSpace($remoteBranch) -or [int]$openPrCount -gt 0) {
-              Write-Host "SKIP: update branch or open PR already exists for $branch."
+            if ([int]$openPrCount -gt 0) {
+              Write-Host "SKIP: an open PR already exists for $branch."
               git checkout -- $manifestPath
               if ($LASTEXITCODE -ne 0) { throw "Failed to revert $manifestPath after skipping duplicate PR." }
               $shouldProceed = $false
@@ -93,7 +91,14 @@ jobs:
           git switch -c $branch
           git add "bucket/$package.json"
           git commit -m "chore($package): update $old to $new"
-          git push --set-upstream origin $branch
+          git push --force-with-lease --set-upstream origin $branch
+          if ($LASTEXITCODE -ne 0) { throw "Failed to push $branch." }
+          $openPrCount = (& gh pr list --head $branch --state open --json number --jq 'length') -join ''
+          if ($LASTEXITCODE -ne 0) { throw "gh pr list failed before creating PR for $branch." }
+          if ([int]$openPrCount -gt 0) {
+            Write-Host "SKIP: an open PR already exists for $branch."
+            exit 0
+          }
           $manifest = Get-Content -LiteralPath "bucket/$package.json" -Raw | ConvertFrom-Json
           $sources = foreach ($arch in $manifest.architecture.PSObject.Properties) {
             "- $($arch.Name): $($arch.Value.url) (SHA256: ``$($arch.Value.hash)``)"
