@@ -1,16 +1,16 @@
 # Repository Rules for AI Agents
 
-This repository (`zev-scoop`) is a personal Windows Scoop bucket whose default branch is `dev`. Follow these rules strictly on every task.
+This repository (`zev-scoop`) is a personal Windows Scoop bucket whose default branch is `main`. Follow these rules strictly on every task.
 
 ## 1. Branch & Pull Request Workflow
 
-- **Never commit or push directly to `dev` (or `main`/`master`).**
-- Always branch from up-to-date `dev` using a descriptive branch name:
+- **Never commit or push directly to `main` (or `master`).**
+- Always branch from up-to-date `main` using a descriptive branch name:
   - `feat/<topic>` for new packages or features
   - `fix/<topic>` for bug fixes
   - `docs/<topic>` for documentation updates
   - `chore/<topic>` for maintenance or CI updates
-- Open a Pull Request targeting `dev` with:
+- Open a Pull Request targeting `main` with:
   - Summary of changes and official upstream evidence (for packages)
   - Exact local verification commands and results (never claim checks that were not run)
 - **Never auto-merge Pull Requests.** All PRs require passing CI checks and manual human review.
