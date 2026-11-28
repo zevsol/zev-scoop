@@ -106,4 +106,4 @@ AGENTS.md                AI 代理协作与分支/PR 硬性规范
 
 ## 参与维护
 
-所有手动修改与自动更新均应基于独立分支向默认分支 `dev` 提交 Pull Request，待 CI 校验通过后再人工审核合并，禁止直接向 `dev` 推送。新增软件时，先核实官方分发渠道、架构、版本接口、哈希/签名、许可及完整安装卸载行为，再添加 Manifest 和适配测试。按类别的调查清单、分支/PR 规范及本地命令见 [CONTRIBUTING.md](CONTRIBUTING.md) 与 [AGENTS.md](AGENTS.md)。
+所有手动修改与自动更新均应基于独立分支向默认分支 `main` 提交 Pull Request，待 CI 校验通过后再人工审核合并，禁止直接向 `main` 推送。新增软件时，先核实官方分发渠道、架构、版本接口、哈希/签名、许可及完整安装卸载行为，再添加 Manifest 和适配测试。按类别的调查清单、分支/PR 规范及本地命令见 [CONTRIBUTING.md](CONTRIBUTING.md) 与 [AGENTS.md](AGENTS.md)。
