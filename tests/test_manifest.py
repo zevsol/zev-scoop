@@ -46,15 +46,17 @@ class UpdaterTests(unittest.TestCase):
     def test_qoder_cn_archive_layout_and_path_safety(self):
         with tempfile.TemporaryDirectory() as directory:
             archive_path = Path(directory) / "qoder.zip"
+            expected = {"qoderclicn.exe", "LICENSE", "NOTICE", "PDF-THIRD-PARTY-NOTICES.txt", "THIRD-PARTY-LICENSES"}
             with zipfile.ZipFile(archive_path, "w") as archive:
-                archive.writestr("qoderclicn.exe", b"binary")
-                archive.writestr("THIRD-PARTY-LICENSES", b"licenses")
-            self.assertEqual({"qoderclicn.exe", "THIRD-PARTY-LICENSES"}, set(cn_updater.validate_archive(archive_path)))
-            with zipfile.ZipFile(archive_path, "w") as archive:
-                archive.writestr("../outside.txt", b"unsafe")
-                archive.writestr("qoderclicn.exe", b"binary")
-            with self.assertRaises(cn_updater.UpdateError):
-                cn_updater.validate_archive(archive_path)
+                for member in expected:
+                    archive.writestr(member, b"content")
+            self.assertEqual(expected, set(cn_updater.validate_archive(archive_path)))
+            for bad_member in ("../outside.txt", "docs/LICENSE", "LICENSE.exe", "NOTICE.dll", "unexpected.dll"):
+                with zipfile.ZipFile(archive_path, "w") as archive:
+                    archive.writestr("qoderclicn.exe", b"binary")
+                    archive.writestr(bad_member, b"bad")
+                with self.assertRaises(cn_updater.UpdateError):
+                    cn_updater.validate_archive(archive_path)
 
     def test_antigravity_archive_requires_expected_executable_and_safe_paths(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -142,20 +144,17 @@ class UpdaterTests(unittest.TestCase):
             with zipfile.ZipFile(archive_path, "w") as archive:
                 archive.writestr("qodercli.exe", b"binary")
             self.assertEqual(["qodercli.exe"], updater.validate_archive(archive_path))
+            expected = {"qodercli.exe", "LICENSE", "NOTICE", "PDF-THIRD-PARTY-NOTICES.txt", "THIRD-PARTY-LICENSES"}
             with zipfile.ZipFile(archive_path, "w") as archive:
-                archive.writestr("qodercli.exe", b"binary")
-                archive.writestr("THIRD-PARTY-LICENSES", b"licenses")
-            self.assertEqual({"qodercli.exe", "THIRD-PARTY-LICENSES"}, set(updater.validate_archive(archive_path)))
-            with zipfile.ZipFile(archive_path, "w") as archive:
-                archive.writestr("../escape.txt", b"unsafe")
-                archive.writestr("qodercli.exe", b"binary")
-            with self.assertRaises(updater.UpdateError):
-                updater.validate_archive(archive_path)
-            with zipfile.ZipFile(archive_path, "w") as archive:
-                archive.writestr("qodercli.exe", b"binary")
-                archive.writestr("unexpected.dll", b"extra")
-            with self.assertRaises(updater.UpdateError):
-                updater.validate_archive(archive_path)
+                for member in expected:
+                    archive.writestr(member, b"content")
+            self.assertEqual(expected, set(updater.validate_archive(archive_path)))
+            for bad_member in ("../escape.txt", "docs/LICENSE", "LICENSE.exe", "NOTICE.dll", "unexpected.dll"):
+                with zipfile.ZipFile(archive_path, "w") as archive:
+                    archive.writestr("qodercli.exe", b"binary")
+                    archive.writestr(bad_member, b"bad")
+                with self.assertRaises(updater.UpdateError):
+                    updater.validate_archive(archive_path)
 
     def test_antigravity_ide_parses_matching_official_urls(self):
         html = (

@@ -94,6 +94,20 @@ def read_manifest() -> dict[str, Any]:
     return value
 
 
+ALLOWED_DOC_EXTENSIONS = {"", ".txt", ".md"}
+ALLOWED_DOC_STEM_KEYWORDS = ("LICENSE", "NOTICE", "COPYING", "README", "CHANGELOG")
+
+
+def is_allowed_doc_file(name: str) -> bool:
+    if "/" in name:
+        return False
+    path_obj = Path(name)
+    if path_obj.suffix.lower() not in ALLOWED_DOC_EXTENSIONS:
+        return False
+    upper_stem = path_obj.stem.upper()
+    return any(keyword in upper_stem for keyword in ALLOWED_DOC_STEM_KEYWORDS)
+
+
 def validate_archive(path: Path) -> list[str]:
     try:
         with zipfile.ZipFile(path) as package:
@@ -103,10 +117,9 @@ def validate_archive(path: Path) -> list[str]:
     normalized = [name.replace("\\", "/") for name in names]
     if any(name.startswith("/") or re.match(r"^[A-Za-z]:", name) or ".." in name.split("/") for name in normalized):
         raise UpdateError(f"Unsafe path in official archive: {names!r}")
-    required = {"qodercli.exe"}
-    allowed = required | {"THIRD-PARTY-LICENSES"}
-    if not required.issubset(normalized) or not set(normalized).issubset(allowed):
-        raise UpdateError(f"Unexpected archive contents: {names!r}; expected qodercli.exe")
+    required_exe = "qodercli.exe"
+    if required_exe not in normalized or any(name != required_exe and not is_allowed_doc_file(name) for name in normalized):
+        raise UpdateError(f"Unexpected archive contents: {names!r}")
     return normalized
 
 
