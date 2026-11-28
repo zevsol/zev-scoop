@@ -1,21 +1,24 @@
 {
     "$schema": "https://raw.githubusercontent.com/ScoopInstaller/Scoop/master/schema.json",
-    "version": "1.5.18",
+    "version": "1.5.19",
     "description": "Official Google Antigravity terminal agent client",
     "homepage": "https://antigravity.google/product/antigravity-cli",
     "license": "Proprietary",
     "architecture": {
         "64bit": {
-            "url": "https://github.com/google-antigravity/antigravity-cli/releases/download/1.5.18/agy_cli_windows_x64.zip",
-            "hash": "3f705965ba256add649a68be8834f73185034bdf206a457255b8a3d3c0497cac"
+            "url": "https://github.com/google-antigravity/antigravity-cli/releases/download/1.5.19/agy_cli_windows_x64.zip",
+            "hash": "1e924d9d39571805163d75e3e9440160ce873fba56ee686e0358bdde1083188e"
         },
         "arm64": {
-            "url": "https://github.com/google-antigravity/antigravity-cli/releases/download/1.5.18/agy_cli_windows_arm64.zip",
-            "hash": "565bd407954416c116be78f057696640bd15485f70e3d95e8ea0d21d6935b9f5"
+            "url": "https://github.com/google-antigravity/antigravity-cli/releases/download/1.5.19/agy_cli_windows_arm64.zip",
+            "hash": "ed2740ae261f8edab62e9e579dc37dee22e4afc55c2320b491178fd4a78e3a4a"
         }
     },
     "bin": [
-        ["agy.cmd", "agy"]
+        [
+            "agy.cmd",
+            "agy"
+        ]
     ],
     "pre_install": [
         "$wrapper = \"@echo off`r`nsetlocal`r`nset `\"AGY_CLI_DISABLE_AUTO_UPDATE=true`\"`r`n`\"%~dp0agy.exe`\" %*`r`nexit /b %ERRORLEVEL%`r`n\"",
